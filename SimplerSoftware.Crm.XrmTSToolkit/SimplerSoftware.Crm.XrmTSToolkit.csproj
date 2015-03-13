@@ -84,7 +84,7 @@
   <ItemGroup>
     <TypeScriptCompile Include="Scripts\typings\jquery\jquery.d.ts" />
     <TypeScriptCompile Include="Scripts\typings\Xrm\Xrm-2015.d.ts" />
-    <TypeScriptCompile Include="XrmTSToolkit.ts" />
+    <TypeScriptCompile Include="Scripts\typings\Xrm\XrmTSToolkit.ts" />
   </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>

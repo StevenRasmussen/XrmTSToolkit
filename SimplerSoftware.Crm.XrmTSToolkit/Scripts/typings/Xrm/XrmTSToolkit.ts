@@ -1,10 +1,10 @@
-﻿/// <reference path="scripts/typings/jquery/jquery.d.ts" />
-/// <reference path="scripts/typings/xrm/xrm-2015.d.ts" />
+﻿/// <reference path="../jquery/jquery.d.ts" />
+/// <reference path="xrm-2015.d.ts" />
 
 /**
 * MSCRM 2011, 2013, 2015 Service Toolkit for TypeScript
 * @author Steven Rasmusse
-* @current version : 0.5
+* @current version : 0.5.2
 * Credits:
 *   The idea of this library was inspired by David Berry and Jaime Ji's XrmServiceToolkit.js
 *    
