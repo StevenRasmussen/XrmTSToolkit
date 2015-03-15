@@ -1,11 +1,10 @@
 ﻿/// <reference path="../jquery/jquery.d.ts" />
 /// <reference path="xrm.d.ts" />
 
-
 /**
 * MSCRM 2011, 2013, 2015 Service Toolkit for TypeScript
 * @author Steven Rasmussen
-* @current version : 0.6.0
+* @current version : 0.6.1
 * Credits:
 *   The idea of this library was inspired by David Berry and Jaime Ji's XrmServiceToolkit.js
 *    
@@ -21,7 +20,7 @@
 * Date: March 12, 2015
 *   Initial Beta Release
 ********************************************
-* Version : 0.6.0
+* Version : 0.6.1
 * Date: March 13, 2015
 *   Added 'Delete', 'Associate', 'Disassociate' methods
 *   Added tests for each method
@@ -794,7 +793,7 @@ module XrmTSToolkit {
         export class UpdateSoapResponse extends SDKResponse { }
         export class DeleteSoapResponse extends SDKResponse { }
         export class RetrieveSoapResponse extends SDKResponse {
-            RetrieveResponse: any;
+            RetrieveResult: Entity;
         }
         export class RetrieveMultipleSoapResponse extends SDKResponse {
             RetrieveMultipleResponse: any;

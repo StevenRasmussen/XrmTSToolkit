@@ -24,7 +24,9 @@ function RunTests(): void {
         Tests.push(DisassociateTest);
         Tests.push(RetrieveMultipleTest_AllColumns);
         Tests.push(RetrieveMultipleTest_QueryExpressionWithFilters);
+        Tests.push(FetchTest);
         Tests.push(DeleteTest);
+        Tests.push(ExecuteTest);
 
         var CurrentFunctionIndex = 0;
         function TestComplete(results: TestResult) {
@@ -109,8 +111,12 @@ function EditEntityTest(PriorTestResult: TestResult): JQueryPromise<TestResult> 
 function RetrieveEntityTest(PriorTestResult: TestResult): JQueryPromise<TestResult> {
     var EntityId = PriorTestResult.ResultValue;
     return $.Deferred<TestResult>(function (dfd) {
-        var Promise = XrmTSToolkit.Soap.Retrieve(EntityId, "account");
+        var Promise = XrmTSToolkit.Soap.Retrieve(EntityId, "account", new XrmTSToolkit.Soap.ColumnSet(true));
         Promise.done(function (data: XrmTSToolkit.Soap.RetrieveSoapResponse, result, xhr) {
+            var Entity = data.RetrieveResult;
+            var BooleanValue = (<XrmTSToolkit.Soap.BooleanValue> Entity.Attributes["creditonhold"]).Value;
+            var OwnerId = (<XrmTSToolkit.Soap.EntityReference> Entity.Attributes["ownerid"]).Id;
+            var OwnerName = (<XrmTSToolkit.Soap.EntityReference> Entity.Attributes["ownerid"]).Name;
             dfd.resolve(new TestResult(true, "Retrieve test succeeded", PriorTestResult.ResultValue));
         });
         Promise.fail(function (result) {
@@ -217,6 +223,42 @@ function RetrieveMultipleTest_QueryExpressionWithFilters(PriorTestResult: TestRe
     }).promise();
 }
 
+function FetchTest(PriorTestResult: TestResult): JQueryPromise<TestResult> {
+    return $.Deferred<TestResult>(function (dfd) {
+        var FetchXML = "" +
+            "<fetch version=\"1.0\" output-format=\"xml-platform\" mapping=\"logical\" distinct=\"false\">" +
+            "<entity name=\"account\">" +
+            "<attribute name=\"name\" />" +
+            "<attribute name=\"primarycontactid\" />" +
+            "<attribute name=\"telephone1\" />" +
+            "<attribute name=\"accountid\" />" +
+            "<order attribute=\"name\" descending=\"false\" />" +
+            "<filter type=\"and\">" +
+            "<condition attribute=\"name\" operator=\"eq\" value=\"Test Account - updated\" />" +
+            "</filter>" +
+            "</entity>" +
+            "</fetch>";
+        var Promise = XrmTSToolkit.Soap.Fetch(FetchXML);
+        Promise.done(function (data: XrmTSToolkit.Soap.RetrieveMultipleSoapResponse, result, xhr) {
+            try {
+                if (!data.RetrieveMultipleResult.Entities || data.RetrieveMultipleResult.Entities.length <= 0) {
+                    throw "The results were empty";
+                }
+                else {
+                    TestEntityValues(data.RetrieveMultipleResult.Entities);
+                }
+                dfd.resolve(new TestResult(true, "Fetch test succeeded", PriorTestResult.ResultValue));
+            }
+            catch (e) {
+                dfd.reject(new TestResult(false, "Fetch succeeded but iterating over the properties failed: " + e, PriorTestResult.ResultValue));
+            }
+        });
+        Promise.fail(function (result) {
+            dfd.reject(new TestResult(false, "Fetch test failed: " + result.response, result));
+        });
+    }).promise();
+}
+
 function TestEntityValues(Entities: Array<XrmTSToolkit.Soap.Entity>) {
     $.each(Entities, function (i, Entity) {
         for (var AttributeName in Entity.Attributes) {
@@ -274,6 +316,28 @@ function TestEntityValues(Entities: Array<XrmTSToolkit.Soap.Entity>) {
             }
         }
     });
+}
+
+function ExecuteTest(PriorTestResult: TestResult): JQueryPromise<TestResult> {
+    //Execute a 'WhoAmI' request
+    var ExecuteXML = "" +
+        "<Execute xmlns=\"http://schemas.microsoft.com/xrm/2011/Contracts/Services\" xmlns:i=\"http://www.w3.org/2001/XMLSchema-instance\">" +
+        "<request i:type=\"b:WhoAmIRequest\" xmlns:a = \"http://schemas.microsoft.com/xrm/2011/Contracts\" xmlns:b = \"http://schemas.microsoft.com/crm/2011/Contracts\">" +
+        "<a:Parameters xmlns:c = \"http://schemas.datacontract.org/2004/07/System.Collections.Generic\" />" +
+        "<a:RequestId i:nil = \"true\" />" +
+        "<a:RequestName>WhoAmI</a:RequestName>" +
+        "</request>" +
+        "</Execute>";
+
+    return $.Deferred<TestResult>(function (dfd) {
+        var Promise = XrmTSToolkit.Soap.Execute(ExecuteXML);
+        Promise.done(function (data: XrmTSToolkit.Soap.SoapResponse, result, xhr) {
+            dfd.resolve(new TestResult(true, "Execute test succeeded", PriorTestResult.ResultValue));
+        });
+        Promise.fail(function (result) {
+            dfd.reject(new TestResult(false, "Execute test failed: " + result.response, result));
+        });
+    }).promise();
 }
 
 function DeleteTest(PriorTestResult: TestResult): JQueryPromise<TestResult> {
