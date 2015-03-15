@@ -76,6 +76,7 @@
     </None>
   </ItemGroup>
   <ItemGroup>
+    <Content Include="Tests\XrmTSToolkitTests.html" />
     <Content Include="Web.config" />
   </ItemGroup>
   <ItemGroup>
@@ -83,8 +84,16 @@
   </ItemGroup>
   <ItemGroup>
     <TypeScriptCompile Include="Scripts\typings\jquery\jquery.d.ts" />
-    <TypeScriptCompile Include="Scripts\typings\Xrm\Xrm-2015.d.ts" />
+    <TypeScriptCompile Include="Scripts\typings\Xrm\Xrm.d.ts" />
     <TypeScriptCompile Include="Scripts\typings\Xrm\XrmTSToolkit.ts" />
+    <TypeScriptCompile Include="Tests\XrmTSToolkitTests.ts" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Charts\" />
+    <Folder Include="Images\" />
+    <Folder Include="Javascript\" />
+    <Folder Include="Styles\" />
+    <Folder Include="Web Files\" />
   </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
