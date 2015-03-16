@@ -86,7 +86,7 @@ Promise.fail(function (result) {
 ### Retrieve
 
 ```typescript
-var Promise = XrmTSToolkit.Soap.Retrieve(EntityId, "account", new XrmTSToolkit.Soap.ColumnSet(true));
+var Promise = XrmTSToolkit.Soap.Retrieve("9C8AF527-2D96-4ADB-9C0B-A21BF460CDDA", "account", new XrmTSToolkit.Soap.ColumnSet(true));
 Promise.done(function (data: XrmTSToolkit.Soap.RetrieveSoapResponse, result, xhr) {
     var Entity = data.RetrieveResponse;
     var BooleanValue = (<XrmTSToolkit.Soap.BooleanValue> Entity.Attributes["creditonhold"]).Value;
