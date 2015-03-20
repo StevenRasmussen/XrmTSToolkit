@@ -468,7 +468,7 @@ var ns = {
 "l": "http://schemas.microsoft.com/xrm/2012/Contracts"};
 ```
 
-Next, in the contructor method, add the parameters to the 'this.Parameters' named array.  The name must match exactly what the actual Soap message requires
+Next, in the constructor method, add the parameters to the 'this.Parameters' named array.  The name must match exactly what the actual Soap message requires
 
 ```typescript
         this.Parameters["Target"] = Target;
@@ -502,3 +502,4 @@ export class CreateResponse extends ExecuteResponse {
 }
 ```
 
+XrmTSToolkit is able to serialize the new class and execute the message appropriately.
