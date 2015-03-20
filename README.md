@@ -379,7 +379,9 @@ Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
 
 ### How To Create Your Own Organization Requests
 
-The following example shows how the 'CreateRequest' is implemented so that you can learn to implement other requests as necessary.  For this example we will be basing everything off of the following XML Soap Message:
+The following example shows how the 'CreateRequest' is implemented so that you can learn to implement other requests as necessary.  For this example we will be basing everything off of the following XML Soap request and response:
+
+##### Soap Request
 
 ```xml
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
@@ -407,6 +409,26 @@ The following example shows how the 'CreateRequest' is implemented so that you c
 </s:Envelope>
 ```
 
+##### Soap Response
+
+```xml
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+  <s:Body>
+    <ExecuteResponse xmlns="http://schemas.microsoft.com/xrm/2011/Contracts/Services" xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+      <ExecuteResult i:type="a:CreateResponse" xmlns:a="http://schemas.microsoft.com/xrm/2011/Contracts">
+        <a:ResponseName>Create</a:ResponseName>
+        <a:Results xmlns:b="http://schemas.datacontract.org/2004/07/System.Collections.Generic">
+          <a:KeyValuePairOfstringanyType>
+            <b:key>id</b:key>
+            <b:value i:type="c:guid" xmlns:c="http://schemas.microsoft.com/2003/10/Serialization/">6cabef12-aece-e411-80be-00155d017a0b</b:value>
+          </a:KeyValuePairOfstringanyType>
+        </a:Results>
+      </ExecuteResult>
+    </ExecuteResponse>
+  </s:Body>
+</s:Envelope>
+```
+
 First, create your custom class that inherits from the 'ExecuteRequest':
 
 ```typescript
@@ -429,6 +451,7 @@ Also make a call to the base class constructor passing in the name of the soap r
 
 '''typescript
 //The default namespace used by XrmTSToolkit to serialize 'Execute' messages is "g" below. If the namespace for your message differs then you will need to specify it by using the list below.
+var ns = {
 "xmlns" : "http://schemas.microsoft.com/xrm/2011/Contracts/Services",
 "s": "http://schemas.xmlsoap.org/soap/envelope/",
 "a": "http://schemas.microsoft.com/xrm/2011/Contracts",
@@ -441,7 +464,7 @@ Also make a call to the base class constructor passing in the name of the soap r
 "h": "http://schemas.microsoft.com/xrm/2011/Metadata",
 "j": "http://schemas.microsoft.com/xrm/2011/Metadata/Query",
 "k": "http://schemas.microsoft.com/xrm/2013/Metadata",
-"l": "http://schemas.microsoft.com/xrm/2012/Contracts"
+"l": "http://schemas.microsoft.com/xrm/2012/Contracts"};
 '''
 
 Next, in the contructor method, add the parameters to the 'this.Parameters' named array.  The name must match exactly what the actual Soap message requires
