@@ -450,7 +450,6 @@ Also make a call to the base class constructor passing in the name of the soap r
 *Note: Generally you will only need to pass in the actual name of the request, ie "Create" in this instance.  However, because the soap type differs from the other requests and namespace we must explicitely specify the type and namespace for the 'CreateRequest'. Here is a list of the namespaces used by XrmTSToolkit:
 
 '''typescript
-//The default namespace used by XrmTSToolkit to serialize 'Execute' messages is "g" below. If the namespace for your message differs then you will need to specify it by using the list below.
 var ns = {
 "xmlns" : "http://schemas.microsoft.com/xrm/2011/Contracts/Services",
 "s": "http://schemas.xmlsoap.org/soap/envelope/",
@@ -465,6 +464,8 @@ var ns = {
 "j": "http://schemas.microsoft.com/xrm/2011/Metadata/Query",
 "k": "http://schemas.microsoft.com/xrm/2013/Metadata",
 "l": "http://schemas.microsoft.com/xrm/2012/Contracts"};
+
+//The default namespace used by XrmTSToolkit to serialize 'Execute' messages is "g" above. If the namespace for your message differs then you will need to specify it by using the list above.
 '''
 
 Next, in the contructor method, add the parameters to the 'this.Parameters' named array.  The name must match exactly what the actual Soap message requires
