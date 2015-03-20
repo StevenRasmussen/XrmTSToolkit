@@ -43,6 +43,10 @@
 *   Moved XML parsing to XrmTSToolkit.XML class and module
 *   Minor bug fixes
 ********************************************
+* Version : 0.8.0
+* Date: XXX
+*   Fixed issue with serialization of columns specified in a columnset
+*   
 */
 
 module XrmTSToolkit {
@@ -784,9 +788,11 @@ module XrmTSToolkit {
                     Data += "<a:Columns />";
                 }
                 else {
-                    for (var Column in this.Columns) {
+                    Data += "<a:Columns>";
+                    $.each(this.Columns, function (i, Column) {
                         Data += "<f:string>" + Column + "</f:string>";
-                    }
+                    });
+                    Data += "</a:Columns>";
                 }
                 return Data;
             }
@@ -1885,6 +1891,7 @@ module XrmTSToolkit {
                 this.Parameters["Revokee"] = Revokee;
             }
         }
+        export class RevokeAccessResponse extends ExecuteResponse { }
         export class RetrievePrincipleAccessRequest extends ExecuteRequest {
 
             /**
@@ -1903,7 +1910,6 @@ module XrmTSToolkit {
         export class RetrievePrincipleAccessResponse extends ExecuteResponse {
             AccessRights: Array<AccessRights>;
         }
-        export class RevokeAccessResponse extends ExecuteResponse { }
         export class PrincipalAccess implements Soap.ISerializable {
             constructor(public AccessMask: AccessRights, public Principal: EntityReference) { }
             Serialize(): string {
