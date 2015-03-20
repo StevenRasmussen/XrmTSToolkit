@@ -33,7 +33,7 @@ The following methods are supported:
 * RevokeAccessRequest
 * RetrievePrincipleAccessRequest
 
-Other organization requests not listed can easily be implemented by inheriting from the 'ExecuteRequest' class. An example is shown below how the 'DeleteRequest' is implemented so that you can create your own requests as needed. Additional requests may be added to the XrmTSToolkit as deemed necessary or perhaps an separate TypeScript file will be created that will contain additional organization requests.  Please submit an issue on GitHub for consideration of another request to be added to the main library.
+Other organization requests not listed can easily be implemented by inheriting from the 'ExecuteRequest' class. An example is shown below how the 'CreateRequest' is implemented so that you can create your own requests as needed. Additional requests may be added to the XrmTSToolkit as deemed necessary or perhaps a separate TypeScript file will be created that will contain additional organization requests.  Please submit an issue on GitHub for consideration of another request to be added to the main library.
 
 ### REST methods
 XrmTSToolkit does not support the REST endpoint.  This may be added in a future release.
@@ -375,5 +375,106 @@ Promise.done(function (data: XrmTSToolkit.Soap.RetrievePrincipleAccessResponse, 
 Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
     //Retrieve principal access failed
 });
+```
+
+### How To Create Your Own Organization Requests
+
+The following example shows how the 'CreateRequest' is implemented so that you can learn to implement other requests as necessary.  For this example we will be basing everything off of the following XML Soap Message:
+
+```xml
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+  <s:Body>
+    <Execute xmlns="http://schemas.microsoft.com/xrm/2011/Contracts/Services" xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+      <request i:type="a:CreateRequest" xmlns:a="http://schemas.microsoft.com/xrm/2011/Contracts">
+        <a:Parameters xmlns:b="http://schemas.datacontract.org/2004/07/System.Collections.Generic">
+          <a:KeyValuePairOfstringanyType>
+            <b:key>Target</b:key>
+            <b:value i:type="a:Entity">
+              <a:Attributes />
+              <a:EntityState i:nil="true" />
+              <a:FormattedValues />
+              <a:Id>00000000-0000-0000-0000-000000000000</a:Id>
+              <a:LogicalName>account</a:LogicalName>
+              <a:RelatedEntities />
+            </b:value>
+          </a:KeyValuePairOfstringanyType>
+        </a:Parameters>
+        <a:RequestId i:nil="true" />
+        <a:RequestName>Create</a:RequestName>
+      </request>
+    </Execute>
+  </s:Body>
+</s:Envelope>
+```
+
+First, create your custom class that inherits from the 'ExecuteRequest':
+
+```typescript
+export class CreateRequest extends ExecuteRequest {
+```
+
+Create your constructor and pass in any necessary parameters to complete the request, in this case all we need is the 'Entity' to be created. 
+
+```typescript
+    constructor(Target: Entity) {
+```
+
+Also make a call to the base class constructor passing in the name of the soap request and optionally specify the soap type with the namespace if necessary:
+
+```typescript
+        super("Create", "a:CreateRequest");
+```
+
+*Note: Generally you will only need to pass in the actual name of the request, ie "Create" in this instance.  However, because the soap type differs from the other requests and namespace we must explicitely specify the type and namespace for the 'CreateRequest'. Here is a list of the namespaces used by XrmTSToolkit:
+
+'''typescript
+//The default namespace used by XrmTSToolkit to serialize 'Execute' messages is "g" below. If the namespace for your message differs then you will need to specify it by using the list below.
+"xmlns" : "http://schemas.microsoft.com/xrm/2011/Contracts/Services",
+"s": "http://schemas.xmlsoap.org/soap/envelope/",
+"a": "http://schemas.microsoft.com/xrm/2011/Contracts",
+"i": "http://www.w3.org/2001/XMLSchema-instance",
+"b": "http://schemas.datacontract.org/2004/07/System.Collections.Generic",
+"c": "http://www.w3.org/2001/XMLSchema",
+"e": "http://schemas.microsoft.com/2003/10/Serialization/",
+"f": "http://schemas.microsoft.com/2003/10/Serialization/Arrays",
+"g": "http://schemas.microsoft.com/crm/2011/Contracts",
+"h": "http://schemas.microsoft.com/xrm/2011/Metadata",
+"j": "http://schemas.microsoft.com/xrm/2011/Metadata/Query",
+"k": "http://schemas.microsoft.com/xrm/2013/Metadata",
+"l": "http://schemas.microsoft.com/xrm/2012/Contracts"
+'''
+
+Next, in the contructor method, add the parameters to the 'this.Parameters' named array.  The name must match exactly what the actual Soap message requires
+
+```typescript
+        this.Parameters["Target"] = Target;
+    }
+```
+
+Optionally create a response class.  This is helpful if you are expecting a result and need to query it. For the create request the id of the newly created record is returned:
+
+```typescript
+export class CreateResponse extends ExecuteResponse {
+    id: string;
+}
+```
+
+Putting it all together. Here is both the request and response in their entirety:
+
+```typescript
+export class CreateRequest extends ExecuteRequest {
+    /**
+     * Constructor.
+     *
+     * @param   {Entity}    Target  Entity to be created.
+     */
+    constructor(Target: Entity) {
+        super("Create", "a:CreateRequest");
+        this.Parameters["Target"] = Target;
+    }
+}
+export class CreateResponse extends ExecuteResponse {
+    id: string;
+}
 ```
 
