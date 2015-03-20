@@ -15,7 +15,25 @@ The following methods are supported:
 * Associate
 * Disassociate
 * Fetch
+* SetState
 * Execute
+
+#### Soap Requests - Used with 'Execute' or 'ExecuteMultiple'
+* ExecuteMultipleRequest
+* CreateRequest
+* UpdateRequest
+* DeleteRequest
+* AssociateRequest
+* DisassociateRequest
+* SetStateRequest
+* WhoAmIRequest
+* AssignRequest
+* GrantAccessRequest
+* ModifyAccessRequest
+* RevokeAccessRequest
+* RetrievePrincipleAccessRequest
+
+Other organization requests not listed can easily be implemented by inheriting from the 'ExecuteRequest' class. An example is shown below how the 'DeleteRequest' is implemented so that you can create your own requests as needed. Additional requests may be added to the XrmTSToolkit as deemed necessary or perhaps an separate TypeScript file will be created that will contain additional organization requests.  Please submit an issue on GitHub for consideration of another request to be added to the main library.
 
 ### REST methods
 XrmTSToolkit does not support the REST endpoint.  This may be added in a future release.
@@ -40,7 +58,7 @@ var Promise = XrmTSToolkit.Soap.Create(Entity);
 Promise.done(function (data: XrmTSToolkit.Soap.CreateSoapResponse, result, xhr) {
     var NewAccountId = data.CreateResult;
 });
-Promise.fail(function (result) {
+Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
     //Error occured
 });
 
@@ -65,7 +83,7 @@ var Promise = XrmTSToolkit.Soap.Update(Entity);
 Promise.done(function (data: XrmTSToolkit.Soap.UpdateSoapResponse, result, xhr) {
     //Successfully updated
 });
-Promise.fail(function (result) {
+Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
     //Error occured
 });
 
@@ -78,7 +96,7 @@ var Promise = XrmTSToolkit.Soap.Delete(new XrmTSToolkit.Soap.EntityReference("9C
 Promise.done(function (data: XrmTSToolkit.Soap.SoapResponse, result, xhr) {
     //Successfully deleted
 });
-Promise.fail(function (result) {
+Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
     //Error occured
 });
 ```
@@ -93,7 +111,7 @@ Promise.done(function (data: XrmTSToolkit.Soap.RetrieveSoapResponse, result, xhr
     var OwnerId = (<XrmTSToolkit.Soap.EntityReference> Entity.Attributes["ownerid"]).Id;
     var OwnerName = (<XrmTSToolkit.Soap.EntityReference> Entity.Attributes["ownerid"]).Name;
 });
-Promise.fail(function (result) {
+Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
     //Error occured
 });
 ```
@@ -114,7 +132,7 @@ Promise.done(function (data: XrmTSToolkit.Soap.RetrieveMultipleSoapResponse, res
         var OwnerName = (<XrmTSToolkit.Soap.EntityReference> Entity.Attributes["ownerid"]).Name;
     });
 });
-Promise.fail(function (result) {
+Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
     //Error occured
 });
 ```
@@ -131,7 +149,7 @@ Promise.done(function (data: XrmTSToolkit.Soap.RetrieveMultipleSoapResponse, res
         var OwnerName = (<XrmTSToolkit.Soap.EntityReference> Entity.Attributes["ownerid"]).Name;
     });
 });
-Promise.fail(function (result) {
+Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
     //Error occured
 });
 ```
@@ -147,7 +165,7 @@ var Promise = XrmTSToolkit.Soap.Associate(
 Promise.done(function (data: XrmTSToolkit.Soap.SoapResponse, result, xhr) {
     //Associate completed successfully
 });
-Promise.fail(function (result) {
+Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
     //Error occurred
 });
 ```
@@ -163,7 +181,7 @@ var Promise = XrmTSToolkit.Soap.Disassociate(
 Promise.done(function (data: XrmTSToolkit.Soap.SoapResponse, result, xhr) {
     //Disassociate completed successfully
 });
-Promise.fail(function (result) {
+Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
     //Error occurred
 });
 ```
@@ -193,12 +211,28 @@ Promise.done(function (data: XrmTSToolkit.Soap.RetrieveMultipleSoapResponse, res
         var OwnerName = (<XrmTSToolkit.Soap.EntityReference> Entity.Attributes["ownerid"]).Name;
     });
 });
-Promise.fail(function (result) {
-    dfd.reject(new TestResult(false, "Fetch test failed: " + result.response, result));
+Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+    //Error occurred
 });
 ```
 
-### Execute
+### Execute (AssignRequest Example)
+
+```typescript
+var AssignRequest = new XrmTSToolkit.Soap.AssignRequest(
+    new XrmTSToolkit.Soap.EntityReference(Xrm.Page.context.getUserId(), "systemuser"),
+    new XrmTSToolkit.Soap.EntityReference("9C8AF527-2D96-4ADB-9C0B-A21BF460CDDA", "account"));
+
+var Promise = XrmTSToolkit.Soap.Execute(AssignRequest);
+Promise.done(function (data: XrmTSToolkit.Soap.AssignResponse, result, xhr) {
+    //Assign completed successfully
+});
+Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+    //Assign Request failed
+});
+```
+
+### Execute (WhoAmI XML Example)
 
 ```typescript
 //Execute a 'WhoAmI' request
@@ -215,7 +249,131 @@ var Promise = XrmTSToolkit.Soap.Execute(ExecuteXML);
 Promise.done(function (data: XrmTSToolkit.Soap.SoapResponse, result, xhr) {
     //WhoAmIRequest executed successfully
 });
-Promise.fail(function (result) {
+Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
     //Error occurred
 });
 ```
+
+### ExecuteMultiple
+
+```typescript
+var AccountId = "9C8AF527-2D96-4ADB-9C0B-A21BF460CDDA";
+var AccountToUpdate = new XrmTSToolkit.Soap.Entity("account", AccountId);
+AccountToUpdate.Attributes["creditonhold"] = new XrmTSToolkit.Soap.BooleanValue(false);
+
+//Create the 'UpdateRequest'
+var UpdateRequest = new XrmTSToolkit.Soap.UpdateRequest(AccountToUpdate);
+
+//Create the 'DeleteRequest'
+var DeleteRequest = new XrmTSToolkit.Soap.DeleteRequest(new XrmTSToolkit.Soap.EntityReference(AccountId, "account"));
+
+//Create the 'ExecuteMultipleRequest' and initialize the settings to 'ContinueOnError' and 'ReturnResponses'
+var ExecuteMultipleRequest = new XrmTSToolkit.Soap.ExecuteMultipleRequest();
+ExecuteMultipleRequest.Settings.ContinueOnError = true;
+ExecuteMultipleRequest.Settings.ReturnResponses = true;
+
+//Add the requests to the 'ExecuteMultipleRequest'
+ExecuteMultipleRequest.Requests.push(UpdateRequest);
+ExecuteMultipleRequest.Requests.push(DeleteRequest);
+
+//Generate the 'RequestMultiple' promise and cast the return type to 'ExecuteMultipleResponse'
+var RequestMultiplePromise = XrmTSToolkit.Soap.Execute<XrmTSToolkit.Soap.ExecuteMultipleResponse>(ExecuteMultipleRequest);
+RequestMultiplePromise.done(function (data, result, xhr) {
+    $.each(data.Responses, function (i, ResponseItem) {
+        if (ResponseItem.Fault) {
+            //There was an error with the specific request
+            
+        }
+    });
+});
+RequestMultiplePromise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+    //ExecuteMultiple request failed
+});
+```
+
+### AssignRequest
+
+```typescript
+var AssignRequest = new XrmTSToolkit.Soap.AssignRequest(
+    new XrmTSToolkit.Soap.EntityReference(Xrm.Page.context.getUserId(), "systemuser"),
+    new XrmTSToolkit.Soap.EntityReference("9C8AF527-2D96-4ADB-9C0B-A21BF460CDDA", "account"));
+
+var Promise = XrmTSToolkit.Soap.Execute(AssignRequest);
+Promise.done(function (data: XrmTSToolkit.Soap.AssignResponse, result, xhr) {
+    //Success
+});
+Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+    //Assign request failed
+});
+```
+
+### GrantAccessRequest
+
+```typescript
+var GrantAccessRequest = new XrmTSToolkit.Soap.GrantAccessRequest(
+    new XrmTSToolkit.Soap.EntityReference("9C8AF527-2D96-4ADB-9C0B-A21BF460CDDA", "account"),
+    new XrmTSToolkit.Soap.EntityReference(Xrm.Page.context.getUserId(), "systemuser"),
+    XrmTSToolkit.Soap.AccessRights.ShareAccess);
+
+var Promise = XrmTSToolkit.Soap.Execute(GrantAccessRequest);
+Promise.done(function (data: XrmTSToolkit.Soap.GrantAccessResponse, result, xhr) {
+    //Grant access succeeded
+});
+Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+    //Grant access failed
+});
+```
+
+### ModifyAccessRequest
+
+```typescript
+var ModifyAccessRequest = new XrmTSToolkit.Soap.ModifyAccessRequest(
+    new XrmTSToolkit.Soap.EntityReference("9C8AF527-2D96-4ADB-9C0B-A21BF460CDDA", "account"),
+    new XrmTSToolkit.Soap.EntityReference(Xrm.Page.context.getUserId(), "systemuser"),
+    XrmTSToolkit.Soap.AccessRights.WriteAccess);
+
+var Promise = XrmTSToolkit.Soap.Execute(ModifyAccessRequest);
+Promise.done(function (data: XrmTSToolkit.Soap.GrantAccessResponse, result, xhr) {
+    //Modify access completed successfully
+});
+Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+    //Modify access failed
+});
+```
+
+### RevokeAccessRequest
+
+```typescript
+var RevokeAccessRequest = new XrmTSToolkit.Soap.RevokeAccessRequest(
+    new XrmTSToolkit.Soap.EntityReference("9C8AF527-2D96-4ADB-9C0B-A21BF460CDDA", "account"),
+    new XrmTSToolkit.Soap.EntityReference(Xrm.Page.context.getUserId(), "systemuser"));
+
+var Promise = XrmTSToolkit.Soap.Execute(RevokeAccessRequest);
+Promise.done(function (data: XrmTSToolkit.Soap.RevokeAccessResponse, result, xhr) {
+    //Revoke access completed successfully
+});
+Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+    //Revoke access failed
+});
+```
+
+### RetrievePrincipleAccessRequest
+
+```typescript
+var RetrieveAccessRequest = new XrmTSToolkit.Soap.RetrievePrincipleAccessRequest(
+    new XrmTSToolkit.Soap.EntityReference("9C8AF527-2D96-4ADB-9C0B-A21BF460CDDA", "account"),
+    new XrmTSToolkit.Soap.EntityReference(Xrm.Page.context.getUserId(), "systemuser"));
+
+var Promise = XrmTSToolkit.Soap.Execute(RetrieveAccessRequest);
+Promise.done(function (data: XrmTSToolkit.Soap.RetrievePrincipleAccessResponse, result, xhr) {
+    //Retrieve principal access succeeded.  Iterate through all the access rights and get their text
+    var RightsStrings = [];
+    $.each(data.AccessRights, function (i, Right) {
+        RightsStrings.push(XrmTSToolkit.Soap.AccessRights[Right].toString());
+    });
+});
+Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+    //Retrieve principal access failed
+});
+```
+
