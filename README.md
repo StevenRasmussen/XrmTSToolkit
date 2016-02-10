@@ -501,3 +501,4 @@ export class CreateResponse extends ExecuteResponse {
 }
 ```
 
+XrmTSToolkit is able to serialize the new class and execute the message appropriately.
