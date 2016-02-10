@@ -44,6 +44,7 @@ XrmTSToolkit does not support the REST endpoint.  This may be added in a future 
 
 var Entity = new XrmTSToolkit.Soap.Entity("account");
 Entity.Attributes["creditonhold"] = new XrmTSToolkit.Soap.BooleanValue(true);
+Entity.Attributes["donotemail"] = true; //You can also just pass a bool instead of a 'BooleanValue'
 Entity.Attributes["creditlimit"] = new XrmTSToolkit.Soap.MoneyValue(1000);
 Entity.Attributes["lastusedincampaign"] = new XrmTSToolkit.Soap.DateValue(new Date());
 Entity.Attributes["exchangerate"] = new XrmTSToolkit.Soap.DecimalValue(2000);
@@ -51,6 +52,7 @@ Entity.Attributes["address1_latitude"] = new XrmTSToolkit.Soap.FloatValue(90);
 Entity.Attributes["numberofemployees"] = new XrmTSToolkit.Soap.IntegerValue(4000);
 Entity.Attributes["ownerid"] = new XrmTSToolkit.Soap.EntityReference(Xrm.Page.context.getUserId(), "systemuser");
 Entity.Attributes["description"] = new XrmTSToolkit.Soap.StringValue("This is a long string value");
+Entity.Attributes["telephone1"] = "(999) 123-4567"; //You can also just pass a string instead of a 'StringValue'
 Entity.Attributes["accountcategorycode"] = new XrmTSToolkit.Soap.OptionSetValue(1);
 Entity.Attributes["name"] = new XrmTSToolkit.Soap.StringValue("Test Account");
 
