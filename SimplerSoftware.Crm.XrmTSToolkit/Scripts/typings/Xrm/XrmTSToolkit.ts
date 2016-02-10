@@ -4,7 +4,7 @@
 /**
 * MSCRM 2011, 2013, 2015 Service Toolkit for TypeScript
 * @author Steven Rasmussen
-* @current version : 0.7.0
+* @current version : 0.8.0
 * Credits:
 *   The idea of this library was inspired by David Berry and Jaime Ji's XrmServiceToolkit.js
 *    
