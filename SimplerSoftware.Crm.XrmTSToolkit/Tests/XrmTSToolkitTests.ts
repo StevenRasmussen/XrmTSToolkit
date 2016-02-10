@@ -5,8 +5,8 @@ function OpenXrmTSToolkitTestPage() {
     var URL = Xrm.Page.context.getClientUrl() + "/WebResources/new_/Tests/XrmTSToolkitTests.html";
     //window.showModelessDialog(URL, Xrm);
 
-    var DialogOptions = { width: 700, height: 600 };
-    (<any> Xrm).Internal.openDialog(URL, DialogOptions, null, null, function () {
+    var DialogOptions = { width: 700, height: 700 };
+    (<any>Xrm).Internal.openDialog(URL, DialogOptions, null, null, function () {
 
     });
 }
@@ -15,9 +15,9 @@ class TestResult {
     constructor(public Result: boolean, public ResultMessage: string, public ResultValue?: any) { }
 }
 
+var RunExtendedTests = true;
 function RunTests(): void {
-    try
-    {
+    try {
         $("#testresults").empty();
 
         var Tests = new Array<any>();
@@ -27,9 +27,11 @@ function RunTests(): void {
         Tests.push(AssociateTest);
         Tests.push(RetrieveManyToManyTest);
         Tests.push(DisassociateTest);
-        Tests.push(RetrieveMultipleTest_AllColumns);
-        Tests.push(RetrieveMultipleTest_QueryExpressionWithFilters);
-        Tests.push(FetchTest);
+        if (RunExtendedTests == true) {
+            Tests.push(RetrieveMultipleTest_AllColumns);
+            Tests.push(RetrieveMultipleTest_QueryExpressionWithFilters);
+            Tests.push(FetchTest);
+        }
         Tests.push(SetStateTest_SetInactive);
         Tests.push(SetStateTest_SetActive);
         Tests.push(AssignTest);
@@ -47,20 +49,29 @@ function RunTests(): void {
         Tests.push(DeleteTest2);
         Tests.push(ExecuteMultipleTest1);
         Tests.push(ExecuteMultipleTest2);
+        Tests.push(RetrieveEntityMetadata);
+        Tests.push(EntityReferenceTest);
 
         var CurrentFunctionIndex = 0;
         function TestComplete(results: TestResult) {
+
             if (results.Result) {
                 //Success
                 $("#testresults").append($("<div>" + results.ResultMessage + "</div>"));
                 if (!(CurrentFunctionIndex >= Tests.length)) {
+
                     try {
+                        var testName = "Test " + functionName(Tests[CurrentFunctionIndex]);
+                        console.time(testName);
                         var NewDeferred = Tests[CurrentFunctionIndex](results);
                         CurrentFunctionIndex += 1;
+                        NewDeferred.always(function () {
+                            console.timeEnd(testName);
+                        });
                         NewDeferred.always(TestComplete);
                     }
                     catch (e) {
-                        $("#testresults").append($("<div style='color:red'>" + results.ResultMessage + "</div>"));
+                        $("#testresults").append($("<div style='color:red'>" + e.toString() + "</div>"));
                         $("#testresults").append($("<div style='color:red'>Cancelling remaining tests.</div>"));
                     }
                 }
@@ -75,13 +86,19 @@ function RunTests(): void {
             }
         }
 
-        try
-        {
+        try {
             var Deferred = MainTestFunction();
             Deferred.always(TestComplete);
         }
         catch (e) {
             alert(e);
+        }
+
+        function functionName(fun) {
+            var ret = fun.toString();
+            ret = ret.substr('function '.length);
+            ret = ret.substr(0, ret.indexOf('('));
+            return ret;
         }
     }
     catch (e) {
@@ -98,6 +115,7 @@ function MainTestFunction(): JQueryPromise<TestResult> {
 function CreateEntityTest1(): JQueryPromise<TestResult> {
     var Entity = new XrmTSToolkit.Soap.Entity("account");
     Entity.Attributes["creditonhold"] = new XrmTSToolkit.Soap.BooleanValue(true);
+    Entity.Attributes["donotemail"] = true; //Test using just a boolean instead of just the 'BooleanValue'
     Entity.Attributes["creditlimit"] = new XrmTSToolkit.Soap.MoneyValue(1000);
     Entity.Attributes["lastusedincampaign"] = new XrmTSToolkit.Soap.DateValue(new Date());
     Entity.Attributes["exchangerate"] = new XrmTSToolkit.Soap.DecimalValue(2000);
@@ -105,13 +123,17 @@ function CreateEntityTest1(): JQueryPromise<TestResult> {
     Entity.Attributes["numberofemployees"] = new XrmTSToolkit.Soap.IntegerValue(4000);
     Entity.Attributes["ownerid"] = new XrmTSToolkit.Soap.EntityReference(Xrm.Page.context.getUserId(), "systemuser");
     Entity.Attributes["description"] = new XrmTSToolkit.Soap.StringValue("This is a long string value");
+    Entity.Attributes["telephone1"] = "(999) 123-4567"; //Test using a string instead of just the 'StringValue'
     Entity.Attributes["accountcategorycode"] = new XrmTSToolkit.Soap.OptionSetValue(1);
     Entity.Attributes["name"] = new XrmTSToolkit.Soap.StringValue("Test Account");
 
     return $.Deferred<TestResult>(function (dfd) {
         var Promise = XrmTSToolkit.Soap.Create(Entity);
         Promise.done(function (data: XrmTSToolkit.Soap.CreateSoapResponse, result, xhr) {
-            dfd.resolve(new TestResult(true, "Create1 test succeeded", data.CreateResult));
+            if (!data.CreateResult) { dfd.reject(new TestResult(false, "Create test failed")); }
+            else {
+                dfd.resolve(new TestResult(true, "Create1 test succeeded", data.CreateResult));
+            }
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
             dfd.reject(new TestResult(false, "Create1 test failed: " + result.faultstring, result));
@@ -148,11 +170,20 @@ function RetrieveEntityTest(PriorTestResult: TestResult): JQueryPromise<TestResu
     return $.Deferred<TestResult>(function (dfd) {
         var Promise = XrmTSToolkit.Soap.Retrieve(EntityId, "account", new XrmTSToolkit.Soap.ColumnSet(true));
         Promise.done(function (data: XrmTSToolkit.Soap.RetrieveSoapResponse, result, xhr) {
-            var Entity = data.RetrieveResult;
-            var BooleanValue = (<XrmTSToolkit.Soap.BooleanValue> Entity.Attributes["creditonhold"]).Value;
-            var OwnerId = (<XrmTSToolkit.Soap.EntityReference> Entity.Attributes["ownerid"]).Id;
-            var OwnerName = (<XrmTSToolkit.Soap.EntityReference> Entity.Attributes["ownerid"]).Name;
-            dfd.resolve(new TestResult(true, "Retrieve test succeeded", PriorTestResult.ResultValue));
+            try {
+                var Entity = data.RetrieveResult;
+                var BooleanValue = (<XrmTSToolkit.Soap.BooleanValue>Entity.Attributes["creditonhold"]).Value;
+                if (!BooleanValue) { throw { description: "The boolean value was not returned" }; }
+                var OwnerId = (<XrmTSToolkit.Soap.EntityReference>Entity.Attributes["ownerid"]).Id;
+                if (!OwnerId) { throw { description: "The entity reference value was not returned" }; }
+                var OwnerName = (<XrmTSToolkit.Soap.EntityReference>Entity.Attributes["ownerid"]).Name;
+                var FormattedValue = (<XrmTSToolkit.Soap.OptionSetValue>Entity.Attributes["statuscode"]).FormattedValue;
+                if (!FormattedValue) { throw { description: "The formatted value was not returned" }; }
+                dfd.resolve(new TestResult(true, "Retrieve test succeeded", PriorTestResult.ResultValue));
+            }
+            catch (e) {
+                dfd.reject(new TestResult(false, "Retrieve test failed: " + e.description));
+            }
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
             dfd.reject(new TestResult(false, "Retrieve test failed: " + result.faultstring, result));
@@ -181,6 +212,8 @@ function RetrieveManyToManyTest(PriorTestResult: TestResult): JQueryPromise<Test
     return $.Deferred<TestResult>(function (dfd) {
         var Promise = XrmTSToolkit.Soap.RetrieveRelatedManyToMany("account", PriorTestResult.ResultValue, "systemuser", "new_account_systemuser", new XrmTSToolkit.Soap.ColumnSet(false));
         Promise.done(function (data: XrmTSToolkit.Soap.RetrieveMultipleSoapResponse, result, xhr) {
+            if (!data.RetrieveMultipleResult || !data.RetrieveMultipleResult.Entities) { dfd.reject(new TestResult(false, "No records were returned from the RetrieveManyToManyTest test.")); }
+            TestEntityValues(data.RetrieveMultipleResult.Entities);
             dfd.resolve(new TestResult(true, "Retrieve ManyToManyTest test succeeded", PriorTestResult.ResultValue));
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
@@ -214,7 +247,7 @@ function RetrieveMultipleTest_AllColumns(PriorTestResult: TestResult): JQueryPro
         Promise.done(function (data: XrmTSToolkit.Soap.RetrieveMultipleSoapResponse, result, xhr) {
             try {
                 if (!data.RetrieveMultipleResult.Entities || data.RetrieveMultipleResult.Entities.length <= 0) {
-                    throw "The results were empty";
+                    throw "No records were returned from the RetrieveMultipleTest_AllColumns test.";
                 }
                 else {
                     TestEntityValues(data.RetrieveMultipleResult.Entities);
@@ -241,7 +274,7 @@ function RetrieveMultipleTest_QueryExpressionWithFilters(PriorTestResult: TestRe
         Promise.done(function (data: XrmTSToolkit.Soap.RetrieveMultipleSoapResponse, result, xhr) {
             try {
                 if (!data.RetrieveMultipleResult.Entities || data.RetrieveMultipleResult.Entities.length <= 0) {
-                    throw "The results were empty";
+                    throw "No records were returned from the RetrieveMultipleTest_QueryExpressionWithFilters test.";
                 }
                 else {
                     TestEntityValues(data.RetrieveMultipleResult.Entities);
@@ -278,10 +311,9 @@ function FetchTest(PriorTestResult: TestResult): JQueryPromise<TestResult> {
         Promise.done(function (data: XrmTSToolkit.Soap.RetrieveMultipleSoapResponse, result, xhr) {
             try {
                 if (!data.RetrieveMultipleResult.Entities || data.RetrieveMultipleResult.Entities.length <= 0) {
-                    throw "The results were empty";
+                    throw "No records were returned from the FetchTest test.";
                 }
-                else if (data.RetrieveMultipleResult.Entities.length == 5000)
-                {
+                else if (data.RetrieveMultipleResult.Entities.length == 5000) {
                     throw "The maximum result limit was reached. It should retrieve all available records";
                 }
                 else {
@@ -301,60 +333,68 @@ function FetchTest(PriorTestResult: TestResult): JQueryPromise<TestResult> {
 
 function TestEntityValues(Entities: Array<XrmTSToolkit.Soap.Entity>) {
     $.each(Entities, function (i, Entity) {
+        if (!Entity.Attributes) {
+            throw "The attributes collection did not populate correctly";
+        }
+        var attributeCount = 0;
         for (var AttributeName in Entity.Attributes) {
-            var Value = Entity.Attributes[AttributeName];
-            if (Value && !Value.IsNull()) {
-                switch (Value.Type) {
+            attributeCount += 1;
+            var value = Entity.Attributes[AttributeName];
+            if (value instanceof XrmTSToolkit.Soap.AttributeValue && !value.IsNull()) {
+                switch (value.Type) {
                     case XrmTSToolkit.Soap.AttributeType.Boolean:
-                        var BooleanValue = (<XrmTSToolkit.Soap.BooleanValue>Value).Value;
+                        var BooleanValue = (<XrmTSToolkit.Soap.BooleanValue>value).Value;
                         if (!(typeof BooleanValue === "boolean")) { throw "'BooleanValue' value did not match the expected type." }
                         break;
                     case XrmTSToolkit.Soap.AttributeType.Date:
-                        var DateValue = (<XrmTSToolkit.Soap.DateValue>Value).Value;
+                        var DateValue = (<XrmTSToolkit.Soap.DateValue>value).Value;
                         if (!(DateValue instanceof Date)) { throw "'DateValue' value did not match the expected type." }
                         break;
                     case XrmTSToolkit.Soap.AttributeType.Decimal:
-                        var NumberValue = (<XrmTSToolkit.Soap.DecimalValue>Value).Value;
+                        var NumberValue = (<XrmTSToolkit.Soap.DecimalValue>value).Value;
                         if (!(typeof NumberValue === "number")) { throw "'DecimalValue' value did not match the expected type." }
                         break;
                     case XrmTSToolkit.Soap.AttributeType.Double:
-                        var NumberValue = (<XrmTSToolkit.Soap.FloatValue>Value).Value;
+                        var NumberValue = (<XrmTSToolkit.Soap.FloatValue>value).Value;
                         if (!(typeof NumberValue === "number")) { throw "'FloatValue' value did not match the expected type." }
                         break;
                     case XrmTSToolkit.Soap.AttributeType.EntityReference:
-                        var LookupValue = (<XrmTSToolkit.Soap.EntityReference>Value);
+                        var LookupValue = (<XrmTSToolkit.Soap.EntityReference>value);
                         if (!(LookupValue instanceof XrmTSToolkit.Soap.EntityReference)) { throw "'EntityReference' value did not match the expected type." }
                         break;
                     case XrmTSToolkit.Soap.AttributeType.Float:
-                        var NumberValue = (<XrmTSToolkit.Soap.FloatValue>Value).Value;
+                        var NumberValue = (<XrmTSToolkit.Soap.FloatValue>value).Value;
                         if (!(typeof NumberValue === "number")) { throw "'FloatValue' value did not match the expected type." }
                         break;
                     case XrmTSToolkit.Soap.AttributeType.Guid:
-                        var StringValue = (<XrmTSToolkit.Soap.GuidValue>Value).Value;
+                        var StringValue = (<XrmTSToolkit.Soap.GuidValue>value).Value;
                         if (!(typeof StringValue === "string")) { throw "'GuidValue' value did not match the expected type." }
                         break;
                     case XrmTSToolkit.Soap.AttributeType.Integer:
-                        var NumberValue = (<XrmTSToolkit.Soap.IntegerValue>Value).Value;
+                        var NumberValue = (<XrmTSToolkit.Soap.IntegerValue>value).Value;
                         if (!(typeof NumberValue === "number")) { throw "'IntegerValue' value did not match the expected type." }
                         break;
                     case XrmTSToolkit.Soap.AttributeType.Money:
-                        var NumberValue = (<XrmTSToolkit.Soap.MoneyValue>Value).Value;
+                        var NumberValue = (<XrmTSToolkit.Soap.MoneyValue>value).Value;
                         if (!(typeof NumberValue === "number")) { throw "'MoneyValue' value did not match the expected type." }
                         break;
                     case XrmTSToolkit.Soap.AttributeType.OptionSetValue:
-                        var NumberValue = (<XrmTSToolkit.Soap.OptionSetValue>Value).Value;
+                        var NumberValue = (<XrmTSToolkit.Soap.OptionSetValue>value).Value;
                         if (!(typeof NumberValue === "number")) { throw "'OptionSetValue' value did not match the expected type." }
                         break;
                     case XrmTSToolkit.Soap.AttributeType.String:
-                        var StringValue = (<XrmTSToolkit.Soap.StringValue>Value).Value;
+                        var StringValue = (<XrmTSToolkit.Soap.StringValue>value).Value;
                         if (!(typeof StringValue === "string")) { throw "'StringValue' value did not match the expected type." }
                         break;
                     default:
-                        throw "Please update the 'RetrieveMultipleTest' to handle the attribute type: " + XrmTSToolkit.Soap.AttributeType[Value.Type].toString();
+                        throw "Please update the 'RetrieveMultipleTest' to handle the attribute type: " + XrmTSToolkit.Soap.AttributeType[value.Type].toString();
                         break;
                 }
             }
+            else if (typeof value === "string") { }
+            else if (typeof value === "boolean") { }
         }
+        if (attributeCount == 0) { throw "No attributes were retrieved on the entity." }
     });
 }
 
@@ -511,7 +551,7 @@ function WhoAmITest(PriorTestResult: TestResult): JQueryPromise<TestResult> {
             if (!UserId) {
                 throw "Error retrieving UserId";
             }
-            dfd.resolve(new TestResult(true, "WhoAmI test succeeded", PriorTestResult.ResultValue));
+            dfd.resolve(new TestResult(true, "WhoAmI test succeeded: " + UserId, PriorTestResult.ResultValue));
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
             dfd.reject(new TestResult(false, "WhoAmI test failed: " + result.faultstring, result));
@@ -545,10 +585,10 @@ function FaultTest2(PriorTestResult: TestResult): JQueryPromise<TestResult> {
 
         var Promise = XrmTSToolkit.Soap.Execute(AssignRequest);
         Promise.done(function (data: XrmTSToolkit.Soap.AssignResponse, result, xhr) {
-            dfd.resolve(new TestResult(false, "FaultTest test failed - did not throw an exception.", PriorTestResult.ResultValue));
+            dfd.resolve(new TestResult(false, "FaultTest2 test failed - did not throw an exception.", PriorTestResult.ResultValue));
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
-            dfd.reject(new TestResult(true, "FaultTest test succeeded: " + result.detail.OrganizationServiceFault.Message));
+            dfd.reject(new TestResult(true, "FaultTest2 test succeeded: " + result.detail.OrganizationServiceFault.Message));
         });
     }).promise();
 }
@@ -569,10 +609,12 @@ function CreateEntityTest2(PriorTestResult: TestResult): JQueryPromise<TestResul
     return $.Deferred<TestResult>(function (dfd) {
         var Promise = XrmTSToolkit.Soap.Execute(new XrmTSToolkit.Soap.CreateRequest(Entity));
         Promise.done(function (data: XrmTSToolkit.Soap.CreateResponse, result, xhr) {
-            dfd.resolve(new TestResult(true, "Create2 test succeeded", data.id));
+            var id = data.id;
+            if (!id) { dfd.reject(new TestResult(false, "CreateEntityTest2 test failed - no id was returned.")); }
+            else { dfd.resolve(new TestResult(true, "CreateEntityTest2 test succeeded: " + id, data.id)); }
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
-            dfd.reject(new TestResult(false, "Create2 test failed: " + result.faultstring, result));
+            dfd.reject(new TestResult(false, "CreateEntityTest2 test failed: " + result.faultstring, result));
         });
     }).promise();
 }
@@ -591,7 +633,7 @@ function UpdateEntityTest2(PriorTestResult: TestResult): JQueryPromise<TestResul
 
     return $.Deferred<TestResult>(function (dfd) {
         var Promise = XrmTSToolkit.Soap.Execute(new XrmTSToolkit.Soap.UpdateRequest(Entity));
-        Promise.done(function (data: XrmTSToolkit.Soap.UpdateSoapResponse, result, xhr) {
+        Promise.done(function (data: XrmTSToolkit.Soap.UpdateResponse, result, xhr) {
             dfd.resolve(new TestResult(true, "Update2 test succeeded", PriorTestResult.ResultValue));
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
@@ -604,7 +646,7 @@ function DeleteTest2(PriorTestResult: TestResult): JQueryPromise<TestResult> {
     return $.Deferred<TestResult>(function (dfd) {
         var DeleteRequest = new XrmTSToolkit.Soap.DeleteRequest(new XrmTSToolkit.Soap.EntityReference(EntityId, "account"));
         var Promise = XrmTSToolkit.Soap.Execute(DeleteRequest);
-        Promise.done(function (data: XrmTSToolkit.Soap.SoapResponse, result, xhr) {
+        Promise.done(function (data: XrmTSToolkit.Soap.DeleteResponse, result, xhr) {
             dfd.resolve(new TestResult(true, "Delete2 test succeeded", PriorTestResult.ResultValue));
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
@@ -668,13 +710,60 @@ function ExecuteMultipleTest2(PriorTestResult: TestResult): JQueryPromise<TestRe
 
         var RequestMultiplePromise = XrmTSToolkit.Soap.Execute<XrmTSToolkit.Soap.ExecuteMultipleResponse>(ExecuteMultipleRequest);
         RequestMultiplePromise.done(function (data, result, xhr) {
+            var hasErrors = false;
             $.each(data.Responses, function (i, ResponseItem) {
-                var AccountId = (<XrmTSToolkit.Soap.CreateResponse>  ResponseItem.Response).id;
+                var AccountId = (<XrmTSToolkit.Soap.CreateResponse>ResponseItem.Response).id;
+                if (!AccountId) { hasErrors = true; return false; }
             });
-            dfd.resolve(new TestResult(true, "Execute2 Multiple test succeeded: " + TotalRecordsToCreate.toString() + " records created", PriorTestResult.ResultValue));
+            if (hasErrors == true) { dfd.reject(new TestResult(false, "The entities created did not have an id associated with them.")); }
+            else { dfd.resolve(new TestResult(true, "Execute2 Multiple test succeeded: " + TotalRecordsToCreate.toString() + " records created", PriorTestResult.ResultValue)); }
         });
         RequestMultiplePromise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
             dfd.reject(new TestResult(false, "Execute2 Multiple test failed: " + result.faultstring, result));
         });
     }).promise();
 }
+
+function RetrieveEntityMetadata(PriorTestResult: TestResult): JQueryPromise<TestResult> {
+    return $.Deferred<TestResult>(function (dfd) {
+        var RetrieveEntityMetadata = new XrmTSToolkit.Soap.RetrieveEntityRequest("account", [XrmTSToolkit.Soap.EntityFilters.All], true);
+        var Promise = XrmTSToolkit.Soap.Execute(RetrieveEntityMetadata);
+        Promise.done(function (data: XrmTSToolkit.Soap.RetrieveEntityResponse, result, xhr) {
+            if (data.EntityMetadata.Attributes.length <= 0) {
+                dfd.reject(new TestResult(false, "There were no attributes returned as part of the entity metadata."));
+            }
+            else {
+                var error = "";
+                $.each(data.EntityMetadata.Attributes, function (i, AttributeMeta) {
+                    var Name = AttributeMeta.LogicalName;
+                    if (typeof Name !== "string") { error = "The 'Name' attribute is not of type 'string'"; return false; }
+                });
+                if (error !== "") { dfd.reject(new TestResult(false, "The RetrieveEntityMetadata test failed: " + error)); }
+                else { dfd.resolve(new TestResult(true, "Retrieve Entity Metadata test succeeded", PriorTestResult.ResultValue)); }
+            }
+        });
+        Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+            dfd.reject(new TestResult(false, "Retrieve Entity Metadata test succeeded failed: " + result.faultstring, result));
+        });
+    }).promise();
+}
+
+function EntityReferenceTest(PriorTestResult: TestResult): JQueryPromise<TestResult> {
+    return $.Deferred<TestResult>(function (dfd) {
+        var id = "ID123";
+        var logicalName = "someLogicalName";
+        var name = "someName";
+
+        var entityRef = new XrmTSToolkit.Soap.EntityReference(id, logicalName, name);
+
+        if (entityRef.Id !== id)
+            dfd.reject(new TestResult(false, "The ID's do not match."));
+        else if (entityRef.LogicalName !== logicalName)
+            dfd.reject(new TestResult(false, "The Logical Name's do not match."));
+        else if (entityRef.Name !== name)
+            dfd.reject(new TestResult(false, "The Name's do not match."));
+        else
+            dfd.resolve(new TestResult(true, "All the private fields match the public properties of the entity reference!"));
+    }).promise();
+}
+

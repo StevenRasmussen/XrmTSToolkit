@@ -39,14 +39,21 @@
 *   Improved 'FaultResponse' class definition
 *   Added tests for 'FaultResponse'
 *   Added comments to methods and requests
-*   RetrieveMultiple and Fetch methods are now able to return all results (>5000 records) - set the 'Soap.RetrieveAllEntities = true', default is false
+*   RetrieveMultiple and Fetch methods are now able to return all results (>5000 records) - set the 'Soap.RetrieveAllEntities static property to true', default is false
 *   Moved XML parsing to XrmTSToolkit.XML class and module
 *   Minor bug fixes
 ********************************************
 * Version : 0.8.0
-* Date: XXX
+* Date: February 2, 2016
+*   Updated to TypeScript v1.7.6
 *   Fixed issue with serialization of columns specified in a columnset
-*   
+*   Added RetrieveEntityMetadataRequest and tests
+*   Rewrite of soap response parsing to handle the entity metadata objects and to be more generic
+*   Removed unused method 'FilterNode'
+*   Added the ability to just use a 'bool' or 'string' as a value instead of needing to create a 'BooleanValue' or 'StringValue' when creating a record
+*   Added the private members 'id', 'entityType', and 'name' to the Entity Reference class along with getters and setters for the public properties to allow an EntityReference object to be used
+*       directly with the Xrm.Page.setValue method when working with form scripts - removes the need to create a new object to pass as the value to a lookup attribute on a form.
+*   Added 'EntityReferenceCollection' as a possible type
 */
 
 module XrmTSToolkit {
@@ -58,12 +65,12 @@ module XrmTSToolkit {
          * @return  The server URL.
          */
         public static GetServerURL(): string {
-            var URL: string = document.location.protocol + "//" + document.location.host;
-            var Org: string = Xrm.Page.context.getOrgUniqueName();
-            if (document.location.pathname.toUpperCase().indexOf(Org.toUpperCase()) > -1) {
-                URL += "/" + Org;
+            var url: string = document.location.protocol + "//" + document.location.host;
+            var org: string = Xrm.Page.context.getOrgUniqueName();
+            if (document.location.pathname.toUpperCase().indexOf(org.toUpperCase()) > -1) {
+                url += "/" + org;
             }
-            return URL;
+            return url;
         }
 
         /**
@@ -92,46 +99,53 @@ module XrmTSToolkit {
         static GetURLParameter(name): string {
             return decodeURI((RegExp(name + '=' + '(.+?)(&|$)').exec(location.search) || [, null])[1]);
         }
-        static StripGUID(GUID: string): string {
-            return GUID.replace("{", "").replace("}", "");
+        static StripGUID(guid: string): string {
+            return guid.replace("{", "").replace("}", "");
         }
     }
     export class XML {
-        public static ParseNode(xNode: Node): XML.XMLElement {
-            var Element = new XML.XMLElement();
-            var NodeName = $(xNode).prop("nodeName");
-            if (NodeName.indexOf(":") > 0) {
-                NodeName = NodeName.substring(NodeName.indexOf(":") + 1);
+        public static ParseNode(node: Node): XML.XMLElement {
+            var element = new XML.XMLElement();
+            var nodeName = $(node).prop("nodeName");
+            var timerName = "  Get Contents of node: " + nodeName;
+            console.time(timerName);
+            if (nodeName.indexOf(":") > 0) {
+                nodeName = nodeName.substring(nodeName.indexOf(":") + 1);
             }
-            Element.Name = NodeName;
-            Element.TypeName = $(xNode).attr("i:type");
-            if (Element.TypeName && Element.TypeName.indexOf(":") > 0) {
-                Element.TypeName = Element.TypeName.substring(Element.TypeName.indexOf(":") + 1);
+            element.Name = nodeName;
+            if (element.Name == "AttributeMetadata") {
+                var Thing = "";
             }
-            var ChildNodes = $(xNode).contents();
-            if (ChildNodes && ChildNodes.length > 0) {
-                $.each(ChildNodes, function (i, ChildNode) {
-                    var ChildNodeType = $(ChildNode).prop("nodeType");
-                    if (ChildNodeType && ChildNodeType != 3) {
-                        var ChildElement = XML.ParseNode(ChildNode);
-                        ChildElement.Parent = Element;
-                        Element.Children.push(ChildElement);
+            element.TypeName = $(node).attr("i:type");
+            if (element.TypeName && element.TypeName.indexOf(":") > 0) {
+                element.TypeName = element.TypeName.substring(element.TypeName.indexOf(":") + 1);
+            }
+            var childNodes = $(node).contents();
+
+            if (childNodes && childNodes.length > 0) {
+                for (var i = 0; i < childNodes.length; i++) {
+                    var childNode = childNodes[i];
+                    var childNodeType = $(childNode).prop("nodeType");
+                    if (childNodeType && childNodeType != 3) {
+                        var childElement = XML.ParseNode(childNode);
+                        childElement.Parent = element;
+                        element.Children.push(childElement);
 
                     }
-                });
+                }
             }
-            if (Element.Children.length == 0) {
-                Element.Text = $(xNode).text();
+            if (element.Children.length == 0) {
+                element.Text = $(node).text();
             }
-            return Element;
+            console.timeEnd(timerName);
+            return element;
         }
-        public static FilterNode = function (name) {
-            return this.find('*').filter(function () {
-                return this.nodeName === name;
-            });
-        };
+        //public static FilterNode = function (name) {
+        //    return this.find('*').filter(function () {
+        //        return this.nodeName === name;
+        //    });
+        //};
     }
-
     export class Soap {
 
         /** "true" to retrieve all entities for RetrieveMultiple and Fetch operations, otherwise "false" */
@@ -140,18 +154,18 @@ module XrmTSToolkit {
         /**
          * Creates a new record in CRM
          *
-         * @param   {Soap.Entity}   Entity  The Soap.Entity to create in CRM.
+         * @param   {Soap.Entity}   entity  The Soap.Entity to create in CRM.
          *
          * @return  A JQueryPromise&lt;Soap.CreateSoapResponse&gt;
          */
-        static Create(Entity: Soap.Entity): JQueryPromise<Soap.CreateSoapResponse> {
-            var request = "<entity>" + Entity.Serialize() + "</entity>";
+        static Create(entity: Soap.Entity): JQueryPromise<Soap.CreateSoapResponse> {
+            var requestBody = "<entity>" + entity.Serialize() + "</entity>";
             return $.Deferred<Soap.CreateSoapResponse>(function (dfd) {
-                var Request = Soap.DoRequest<Soap.CreateSoapResponse>(request, "Create");
-                Request.done(function (data, result, xhr) {
+                var request = Soap.DoRequest<Soap.CreateSoapResponse>(requestBody, "Create");
+                request.done(function (data, result, xhr) {
                     dfd.resolve(data);
                 });
-                Request.fail(function (result) {
+                request.fail(function (result) {
                     dfd.reject(result);
                 });
             }).promise();
@@ -160,18 +174,18 @@ module XrmTSToolkit {
         /**
          * Updates the given Entity in CRM.
          *
-         * @param   {Soap.Entity}   Entity  The Soap.Entity to update in CRM..
+         * @param   {Soap.Entity}   entity  The Soap.Entity to update in CRM..
          *
          * @return  A JQueryPromise&lt;Soap.UpdateSoapResponse&gt;
          */
-        static Update(Entity: Soap.Entity): JQueryPromise<Soap.UpdateSoapResponse> {
-            var request = "<entity>" + Entity.Serialize() + "</entity>";
+        static Update(entity: Soap.Entity): JQueryPromise<Soap.UpdateSoapResponse> {
+            var requestBody = "<entity>" + entity.Serialize() + "</entity>";
             return $.Deferred<Soap.UpdateSoapResponse>(function (dfd) {
-                var Request = Soap.DoRequest<Soap.UpdateSoapResponse>(request, "Update");
-                Request.done(function (data, result, xhr) {
+                var request = Soap.DoRequest<Soap.UpdateSoapResponse>(requestBody, "Update");
+                request.done(function (data, result, xhr) {
                     dfd.resolve(data);
                 });
-                Request.fail(function (result) {
+                request.fail(function (result) {
                     dfd.reject(result);
                 });
             }).promise();
@@ -180,38 +194,38 @@ module XrmTSToolkit {
         /**
          * Deletes the given Entity from CRM.
          *
-         * @param   {Soap.EntityReference}  Entity  The entity to delete.
+         * @param   {Soap.EntityReference}  entity  The entity to delete.
          *
          * @return  A JQueryPromise&lt;Soap.UpdateSoapResponse&gt;
          */
-        static Delete(Entity: Soap.EntityReference): JQueryPromise<Soap.DeleteSoapResponse>;
+        static Delete(entity: Soap.EntityReference): JQueryPromise<Soap.DeleteSoapResponse>;
 
         /**
          * Deletes this object.
          *
-         * @param   {string}    EntityName  Logical name of the entity to be deleted.
-         * @param   {string}    EntityId    GUID of the entity to be deleted.
+         * @param   {string}    entityName  Logical name of the entity to be deleted.
+         * @param   {string}    entityId    GUID of the entity to be deleted.
          *
          * @return  A JQueryPromise&lt;Soap.DeleteSoapResponse&gt;
          */
-        static Delete(EntityName: string, EntityId: string): JQueryPromise<Soap.DeleteSoapResponse>;
-        static Delete(Entity: string | Soap.EntityReference, EntityId?: string): JQueryPromise<Soap.DeleteSoapResponse> {
-            var EntityName = "";
-            if (typeof Entity === "string") {
-                EntityName = EntityName;
+        static Delete(entityName: string, entityId: string): JQueryPromise<Soap.DeleteSoapResponse>;
+        static Delete(entity: string | Soap.EntityReference, entityId?: string): JQueryPromise<Soap.DeleteSoapResponse> {
+            var entityName = "";
+            if (typeof entity === "string") {
+                entityName = entityName;
             }
-            else if (Entity instanceof Soap.EntityReference) {
-                EntityName = Entity.LogicalName;
-                EntityId = Entity.Id;
+            else if (entity instanceof Soap.EntityReference) {
+                entityName = entity.LogicalName;
+                entityId = entity.Id;
             }
-            var XML = "<entityName>" + EntityName + "</entityName>";
-            XML += "<id>" + EntityId + "</id>";
+            var xml = "<entityName>" + entityName + "</entityName>";
+            xml += "<id>" + entityId + "</id>";
             return $.Deferred<Soap.DeleteSoapResponse>(function (dfd) {
-                var Request = Soap.DoRequest<Soap.DeleteSoapResponse>(XML, "Delete");
-                Request.done(function (data, result, xhr) {
+                var request = Soap.DoRequest<Soap.DeleteSoapResponse>(xml, "Delete");
+                request.done(function (data, result, xhr) {
                     dfd.resolve(data);
                 });
-                Request.fail(function (result) {
+                request.fail(function (result) {
                     dfd.reject(result);
                 });
             }).promise();
@@ -220,22 +234,22 @@ module XrmTSToolkit {
         /**
          * Retrieves the specified record from CRM.
          *
-         * @param   {string}    Id                  The GUID of the entity to retrieve.
-         * @param   {string}    EntityLogicalName   Entity logical name.
-         * @param   {Soap.ColumnSet}    ColumnSet   Columns to retrieve as part of the entity.
+         * @param   {string}    id                  The GUID of the entity to retrieve.
+         * @param   {string}    entityLogicalName   Entity logical name.
+         * @param   {Soap.ColumnSet}    columnSet   Columns to retrieve as part of the entity.
          *
          * @return  A JQueryPromise&lt;Soap.RetrieveSoapResponse&gt;
          */
-        static Retrieve(Id: string, EntityLogicalName: string, ColumnSet?: Soap.ColumnSet): JQueryPromise<Soap.RetrieveSoapResponse> {
-            Id = Common.StripGUID(Id);
-            if (!ColumnSet || ColumnSet == null) { ColumnSet = new Soap.ColumnSet(false); }
-            var msgBody = "<entityName>" + EntityLogicalName + "</entityName><id>" + Id + "</id><columnSet>" + ColumnSet.Serialize() + "</columnSet>";
+        static Retrieve(id: string, entityLogicalName: string, columnSet?: Soap.ColumnSet): JQueryPromise<Soap.RetrieveSoapResponse> {
+            id = Common.StripGUID(id);
+            if (!columnSet || columnSet == null) { columnSet = new Soap.ColumnSet(false); }
+            var msgBody = "<entityName>" + entityLogicalName + "</entityName><id>" + id + "</id><columnSet>" + columnSet.Serialize() + "</columnSet>";
             return $.Deferred<Soap.RetrieveSoapResponse>(function (dfd) {
-                var Request = Soap.DoRequest<Soap.RetrieveSoapResponse>(msgBody, "Retrieve");
-                Request.done(function (data, result, xhr) {
+                var request = Soap.DoRequest<Soap.RetrieveSoapResponse>(msgBody, "Retrieve");
+                request.done(function (data, result, xhr) {
                     dfd.resolve(data);
                 });
-                Request.fail(function (result) {
+                request.fail(function (result) {
                     dfd.reject(result);
                 });
             }).promise();
@@ -244,25 +258,25 @@ module XrmTSToolkit {
         /**
          * Retrieves records from CRM that match the provided criteria.
          *
-         * @param   {Soap.Query.QueryExpression}    Query   The query specifying the criteria and other parameters.
+         * @param   {Soap.Query.QueryExpression}    query   The query specifying the criteria and other parameters.
          *
          * @return  A JQueryPromise&lt;Soap.RetrieveMultipleSoapResponse&gt;
          */
-        static RetrieveMultiple(Query: Soap.Query.QueryExpression): JQueryPromise<Soap.RetrieveMultipleSoapResponse> {
+        static RetrieveMultiple(query: Soap.Query.QueryExpression): JQueryPromise<Soap.RetrieveMultipleSoapResponse> {
             return $.Deferred<Soap.RetrieveMultipleSoapResponse>(function (dfd) {
-                var Request = Soap.DoRequest<Soap.RetrieveMultipleSoapResponse>(Query.serialize(), "RetrieveMultiple");
-                Request.done(function (data, result, xhr) {
+                var request = Soap.DoRequest<Soap.RetrieveMultipleSoapResponse>(query.serialize(), "RetrieveMultiple");
+                request.done(function (data, result, xhr) {
                     if (data.RetrieveMultipleResult.MoreRecords == true && Soap.RetrieveAllEntities == true) {
-                        Query.PageInfo.PagingCookie = Soap.Entity.EncodeValue(data.RetrieveMultipleResult.PagingCookie);
-                        Query.PageInfo.PageNumber = (Query.PageInfo.PageNumber + 1);
-                        var AdditionalRequest = Soap.RetrieveMultiple(Query);
-                        AdditionalRequest.done(function (data1, result, xhr) {
+                        query.PageInfo.PagingCookie = Soap.Entity.EncodeValue(data.RetrieveMultipleResult.PagingCookie);
+                        query.PageInfo.PageNumber = (query.PageInfo.PageNumber + 1);
+                        var additionalRequest = Soap.RetrieveMultiple(query);
+                        additionalRequest.done(function (data1, result, xhr) {
                             $.each(data1.RetrieveMultipleResult.Entities, function (i, Entity) {
                                 data.RetrieveMultipleResult.Entities.push(Entity);
                             });
                             dfd.resolve(data);
                         });
-                        AdditionalRequest.fail(function (result) {
+                        additionalRequest.fail(function (result) {
                             dfd.reject(result);
                         });
                     }
@@ -270,7 +284,7 @@ module XrmTSToolkit {
                         dfd.resolve(data);
                     }
                 });
-                Request.fail(function (result) {
+                request.fail(function (result) {
                     dfd.reject(result);
                 });
             }).promise();
@@ -279,39 +293,39 @@ module XrmTSToolkit {
         /**
          * Retrieves related many to many.
          *
-         * @param   {string}    LinkFromEntityName                          Entity logical name of the known entity.
-         * @param   {string}    LinkFromEntityId                            Id of the known entity
-         * @param   {string}    LinkToEntityName                            Entity logical name of the records to be retrieved.
-         * @param   {string}    IntermediateTableName                       Name of the intermediate table of the N:N relationship.
-         * @param   {Soap.ColumnSet}    optional Columns                    The columns to be retrieved on the returned records.
-         * @param   {Array{Soap.Query.OrderExpression}} optional SortOrders Sort order of the returned records.
+         * @param   {string}    linkFromEntityName                          Entity logical name of the known entity.
+         * @param   {string}    linkFromEntityId                            Id of the known entity
+         * @param   {string}    linkToEntityName                            Entity logical name of the records to be retrieved.
+         * @param   {string}    intermediateTableName                       Name of the intermediate table of the N:N relationship.
+         * @param   {Soap.ColumnSet}    optional columns                    The columns to be retrieved on the returned records.
+         * @param   {Array{Soap.Query.OrderExpression}} optional sortOrders Sort order of the returned records.
          *
          * @return  A JQueryPromise&lt;Soap.RetrieveMultipleSoapResponse&gt;
          */
         static RetrieveRelatedManyToMany(
-            LinkFromEntityName: string,
-            LinkFromEntityId: string,
-            LinkToEntityName: string,
-            IntermediateTableName: string,
-            Columns: Soap.ColumnSet = new Soap.ColumnSet(false),
-            SortOrders: Array<Soap.Query.OrderExpression> = []): JQueryPromise<Soap.RetrieveMultipleSoapResponse> {
+            linkFromEntityName: string,
+            linkFromEntityId: string,
+            linkToEntityName: string,
+            intermediateTableName: string,
+            columns: Soap.ColumnSet = new Soap.ColumnSet(false),
+            sortOrders: Array<Soap.Query.OrderExpression> = []): JQueryPromise<Soap.RetrieveMultipleSoapResponse> {
 
-            var Condition = new Soap.Query.ConditionExpression(LinkFromEntityName + "id", Soap.Query.ConditionOperator.Equal, new Soap.GuidValue(LinkFromEntityId));
-            var LinkEntity1 = new Soap.Query.LinkEntity(LinkToEntityName, IntermediateTableName, LinkToEntityName + "id", LinkToEntityName + "id", Soap.Query.JoinOperator.Inner);
-            LinkEntity1.LinkCriteria = new Soap.Query.FilterExpression();
-            LinkEntity1.LinkCriteria.AddCondition(Condition);
+            var condition = new Soap.Query.ConditionExpression(linkFromEntityName + "id", Soap.Query.ConditionOperator.Equal, new Soap.GuidValue(linkFromEntityId));
+            var linkEntity1 = new Soap.Query.LinkEntity(linkToEntityName, intermediateTableName, linkToEntityName + "id", linkToEntityName + "id", Soap.Query.JoinOperator.Inner);
+            linkEntity1.LinkCriteria = new Soap.Query.FilterExpression();
+            linkEntity1.LinkCriteria.AddCondition(condition);
 
-            var LinkEntity2 = new Soap.Query.LinkEntity(IntermediateTableName, LinkFromEntityName, LinkFromEntityName + "id", LinkFromEntityName + "id", Soap.Query.JoinOperator.Inner);
-            LinkEntity2.LinkCriteria = new Soap.Query.FilterExpression();
-            LinkEntity2.LinkCriteria.AddCondition(Condition);
-            LinkEntity1.LinkEntities.push(LinkEntity2);
+            var linkEntity2 = new Soap.Query.LinkEntity(intermediateTableName, linkFromEntityName, linkFromEntityName + "id", linkFromEntityName + "id", Soap.Query.JoinOperator.Inner);
+            linkEntity2.LinkCriteria = new Soap.Query.FilterExpression();
+            linkEntity2.LinkCriteria.AddCondition(condition);
+            linkEntity1.LinkEntities.push(linkEntity2);
 
-            var Query = new Soap.Query.QueryExpression(LinkToEntityName);
-            Query.Columns = Columns;
-            Query.LinkEntities.push(LinkEntity1);
-            Query.Orders = SortOrders;
+            var query = new Soap.Query.QueryExpression(linkToEntityName);
+            query.Columns = columns;
+            query.LinkEntities.push(linkEntity1);
+            query.Orders = sortOrders;
 
-            return Soap.RetrieveMultiple(Query);
+            return Soap.RetrieveMultiple(query);
         }
 
         /**
@@ -322,7 +336,7 @@ module XrmTSToolkit {
          * @return  A JQueryPromise&lt;Soap.RetrieveMultipleSoapResponse&gt;
          */
         static Fetch(fetchXml: string): JQueryPromise<Soap.RetrieveMultipleSoapResponse> {
-            var XMLDoc = $.parseXML(fetchXml);
+            var xmlDoc = $.parseXML(fetchXml);
             //First decode all invalid characters
             fetchXml = Soap.DecodeFetchXML(fetchXml);
 
@@ -331,36 +345,36 @@ module XrmTSToolkit {
 
             var msgBody = "<query i:type='a:FetchExpression'><a:Query>" + fetchXml + "</a:Query></query>";
             return $.Deferred<Soap.RetrieveMultipleSoapResponse>(function (dfd) {
-                var Request = Soap.DoRequest<Soap.RetrieveMultipleSoapResponse>(msgBody, "RetrieveMultiple");
-                Request.done(function (data, result, xhr) {
+                var request = Soap.DoRequest<Soap.RetrieveMultipleSoapResponse>(msgBody, "RetrieveMultiple");
+                request.done(function (data, result, xhr) {
                     if (data.RetrieveMultipleResult.MoreRecords == true && Soap.RetrieveAllEntities == true) {
-                        var PagingCookie = XMLDoc.firstChild.attributes.getNamedItem("paging-cookie");
-                        if (!PagingCookie) { PagingCookie = XMLDoc.createAttribute("paging-cookie"); }
-                        else { XMLDoc.firstChild.attributes.removeNamedItem("paging-cookie"); }
+                        var pagingCookie = xmlDoc.firstChild.attributes.getNamedItem("paging-cookie");
+                        if (!pagingCookie) { pagingCookie = xmlDoc.createAttribute("paging-cookie"); }
+                        else { xmlDoc.firstChild.attributes.removeNamedItem("paging-cookie"); }
 
-                        PagingCookie.value = Soap.Entity.EncodeValue(data.RetrieveMultipleResult.PagingCookie);
-                        XMLDoc.firstChild.attributes.setNamedItem(PagingCookie);
+                        pagingCookie.value = Soap.Entity.EncodeValue(data.RetrieveMultipleResult.PagingCookie);
+                        xmlDoc.firstChild.attributes.setNamedItem(pagingCookie);
 
-                        var PageNumber = XMLDoc.firstChild.attributes.getNamedItem("page");
-                        var CurrentPageNumber: number = 1;
-                        if (!PageNumber) {
-                            PageNumber = XMLDoc.createAttribute("page");
+                        var pageNumber = xmlDoc.firstChild.attributes.getNamedItem("page");
+                        var currentPageNumber: number = 1;
+                        if (!pageNumber) {
+                            pageNumber = xmlDoc.createAttribute("page");
                         }
                         else {
-                            CurrentPageNumber = parseInt(PageNumber.value);
-                            XMLDoc.firstChild.attributes.removeNamedItem("page");
+                            currentPageNumber = parseInt(pageNumber.value);
+                            xmlDoc.firstChild.attributes.removeNamedItem("page");
                         }
-                        CurrentPageNumber += 1;
-                        PageNumber.value = CurrentPageNumber.toString();
-                        XMLDoc.firstChild.attributes.setNamedItem(PageNumber);
-                        var AdditionalRequest = Soap.Fetch(Soap.XMLtoString(XMLDoc));
-                        AdditionalRequest.done(function (data1, result, xhr) {
+                        currentPageNumber += 1;
+                        pageNumber.value = currentPageNumber.toString();
+                        xmlDoc.firstChild.attributes.setNamedItem(pageNumber);
+                        var additionalRequest = Soap.Fetch(Soap.XMLtoString(xmlDoc));
+                        additionalRequest.done(function (data1, result, xhr) {
                             $.each(data1.RetrieveMultipleResult.Entities, function (i, Entity) {
                                 data.RetrieveMultipleResult.Entities.push(Entity);
                             });
                             dfd.resolve(data);
                         });
-                        AdditionalRequest.fail(function (result) {
+                        additionalRequest.fail(function (result) {
                             dfd.reject(result);
                         });
                     }
@@ -368,27 +382,27 @@ module XrmTSToolkit {
                         dfd.resolve(data);
                     }
                 });
-                Request.fail(function (result) {
+                request.fail(function (result) {
                     dfd.reject(result);
                 });
             }).promise();
         }
 
-        private static DecodeFetchXML(FetchXML: string): string {
-            FetchXML = FetchXML.replace(/&amp;/g, "&");
-            FetchXML = FetchXML.replace(/&lt;/g, "<");
-            FetchXML = FetchXML.replace(/&gt;/g, ">");
-            FetchXML = FetchXML.replace(/&apos;/g, "'");
-            FetchXML = FetchXML.replace(/&quot;/g, "\"");
-            return FetchXML;
+        private static DecodeFetchXML(fetchXML: string): string {
+            fetchXML = fetchXML.replace(/&amp;/g, "&");
+            fetchXML = fetchXML.replace(/&lt;/g, "<");
+            fetchXML = fetchXML.replace(/&gt;/g, ">");
+            fetchXML = fetchXML.replace(/&apos;/g, "'");
+            fetchXML = fetchXML.replace(/&quot;/g, "\"");
+            return fetchXML;
         }
-        private static EncodeFetchXML(FetchXML: string): string {
-            FetchXML = FetchXML.replace(/&/g, "&amp;");
-            FetchXML = FetchXML.replace(/</g, "&lt;");
-            FetchXML = FetchXML.replace(/>/g, "&gt;");
-            FetchXML = FetchXML.replace(/'/g, "&apos;");
-            FetchXML = FetchXML.replace(/\"/g, "&quot;");
-            return FetchXML;
+        private static EncodeFetchXML(fetchXML: string): string {
+            fetchXML = fetchXML.replace(/&/g, "&amp;");
+            fetchXML = fetchXML.replace(/</g, "&lt;");
+            fetchXML = fetchXML.replace(/>/g, "&gt;");
+            fetchXML = fetchXML.replace(/'/g, "&apos;");
+            fetchXML = fetchXML.replace(/\"/g, "&quot;");
+            return fetchXML;
         }
         private static XMLtoString(elem) {
             var serialized;
@@ -408,36 +422,36 @@ module XrmTSToolkit {
          * Performs an 'Execute' request.
          *
          * @tparam  T   Type of the soap response to be returned.
-         * @param   {string}    ExecuteXML  contents of the '&lt;Execute&gt;' tags,  INCLUDING the '&lt;
+         * @param   {string}    executeXML  contents of the '&lt;Execute&gt;' tags,  INCLUDING the '&lt;
          *                                  Execute&gt;' tags.
          *
          * @return  A JQueryPromise&lt;T&gt;
          */
-        static Execute<T>(ExecuteXML: string): JQueryPromise<T>;
+        static Execute<T>(executeXML: string): JQueryPromise<T>;
 
         /**
          * Executes the specified request.
          *
          * @tparam  T   Type of the soap response to be returned.
-         * @param   {Soap.ExecuteRequest}   ExecuteRequest  The request to execute.
+         * @param   {Soap.ExecuteRequest}   executeRequest  The request to execute.
          *
          * @return  A JQueryPromise&lt;T&gt;
          */
-        static Execute<T extends Soap.ExecuteResponse>(ExecuteRequest: Soap.ExecuteRequest): JQueryPromise<T>;
-        static Execute<T extends Soap.ExecuteResponse>(Execute: string | Soap.ExecuteRequest): JQueryPromise<T> {
+        static Execute<T extends Soap.ExecuteResponse>(executeRequest: Soap.ExecuteRequest): JQueryPromise<T>;
+        static Execute<T extends Soap.ExecuteResponse>(execute: string | Soap.ExecuteRequest): JQueryPromise<T> {
             return $.Deferred<T>(function (dfd) {
-                var ExecuteXML = "";
-                if (typeof Execute === "string") {
-                    ExecuteXML = Execute;
+                var executeXML = "";
+                if (typeof execute === "string") {
+                    executeXML = execute;
                 }
-                else if (Execute instanceof Soap.ExecuteRequest) {
-                    ExecuteXML = Execute.Serialize();
+                else if (execute instanceof Soap.ExecuteRequest) {
+                    executeXML = execute.Serialize();
                 }
-                var Request = Soap.DoRequest<T>(ExecuteXML, "Execute");
-                Request.done(function (data, result, xhr) {
+                var request = Soap.DoRequest<T>(executeXML, "Execute");
+                request.done(function (data, result, xhr) {
                     dfd.resolve(data);
                 });
-                Request.fail(function (result) {
+                request.fail(function (result) {
                     dfd.reject(result);
                 });
             }).promise();
@@ -446,20 +460,20 @@ module XrmTSToolkit {
         /**
          * Associates 2 entities that are linked by a N:N relationship in CRM.
          *
-         * @param   {Soap.EntityReference}  Moniker1    The EntityReference of the first entity.
-         * @param   {Soap.EntityReference}  Moniker2    The EntityReference of the second entity.
-         * @param   {string}    RelationshipName        Name of the N:N relationship (lowercase).
+         * @param   {Soap.EntityReference}  moniker1    The EntityReference of the first entity.
+         * @param   {Soap.EntityReference}  moniker2    The EntityReference of the second entity.
+         * @param   {string}    relationshipName        Name of the N:N relationship (lowercase).
          *
          * @return  A JQueryPromise&lt;Soap.SoapResponse&gt;
          */
-        static Associate(Moniker1: Soap.EntityReference, Moniker2: Soap.EntityReference, RelationshipName: string): JQueryPromise<Soap.SoapResponse> {
-            var AssociateRequest = new Soap.AssociateRequest(Moniker1, Moniker2, RelationshipName);
+        static Associate(moniker1: Soap.EntityReference, moniker2: Soap.EntityReference, relationshipName: string): JQueryPromise<Soap.SoapResponse> {
+            var AssociateRequest = new Soap.AssociateRequest(moniker1, moniker2, relationshipName);
             return $.Deferred<Soap.ExecuteResponse>(function (dfd) {
-                var Request = Soap.Execute<Soap.ExecuteResponse>(AssociateRequest);
-                Request.done(function (data, result, xhr) {
+                var request = Soap.Execute<Soap.ExecuteResponse>(AssociateRequest);
+                request.done(function (data, result, xhr) {
                     dfd.resolve(data);
                 });
-                Request.fail(function (result) {
+                request.fail(function (result) {
                     dfd.reject(result);
                 });
             }).promise();
@@ -468,20 +482,20 @@ module XrmTSToolkit {
         /**
          * Disassociates 2 entities that are linked by a N:N relationship in CRM.
          *
-         * @param   {Soap.EntityReference}  Moniker1    The EntityReference of the first entity.
-         * @param   {Soap.EntityReference}  Moniker2    The EntityReference of the second entity.
-         * @param   {string}    RelationshipName        Name of the N:N relationship (lowercase).
+         * @param   {Soap.EntityReference}  moniker1    The EntityReference of the first entity.
+         * @param   {Soap.EntityReference}  moniker2    The EntityReference of the second entity.
+         * @param   {string}    relationshipName        Name of the N:N relationship (lowercase).
          *
          * @return  A JQueryPromise&lt;Soap.SoapResponse&gt;
          */
-        static Disassociate(Moniker1: Soap.EntityReference, Moniker2: Soap.EntityReference, RelationshipName: string): JQueryPromise<Soap.SoapResponse> {
-            var DisassociateRequest = new Soap.DisassociateRequest(Moniker1, Moniker2, RelationshipName);
+        static Disassociate(moniker1: Soap.EntityReference, moniker2: Soap.EntityReference, relationshipName: string): JQueryPromise<Soap.SoapResponse> {
+            var DisassociateRequest = new Soap.DisassociateRequest(moniker1, moniker2, relationshipName);
             return $.Deferred<Soap.ExecuteResponse>(function (dfd) {
-                var Request = Soap.Execute<Soap.ExecuteResponse>(DisassociateRequest);
-                Request.done(function (data, result, xhr) {
+                var request = Soap.Execute<Soap.ExecuteResponse>(DisassociateRequest);
+                request.done(function (data, result, xhr) {
                     dfd.resolve(data);
                 });
-                Request.fail(function (result) {
+                request.fail(function (result) {
                     dfd.reject(result);
                 });
             }).promise();
@@ -490,70 +504,93 @@ module XrmTSToolkit {
         /**
          * Sets a state.
          *
-         * @param   {Soap.EntityReference}  EntityMoniker   The EntityReference of the record.
-         * @param   {number}    State                       The state (statecode).
-         * @param   {number}    Status                      The status (statuscode).
+         * @param   {Soap.EntityReference}  entityMoniker   The EntityReference of the record.
+         * @param   {number}    state                       The state (statecode).
+         * @param   {number}    status                      The status (statuscode).
          *
          * @return  A JQueryPromise&lt;Soap.SoapResponse&gt;
          */
-        static SetState(EntityMoniker: Soap.EntityReference, State: number, Status: number): JQueryPromise<Soap.SoapResponse>;
+        static SetState(entityMoniker: Soap.EntityReference, state: number, status: number): JQueryPromise<Soap.SoapResponse>;
 
         /**
          * Sets a state.
          *
-         * @param   {Soap.EntityReference}  EntityMoniker   The EntityReference of the record.
-         * @param   {Soap.OptionSetValue}   State           The state (statecode).
-         * @param   {Soap.OptionSetValue}   Status          The status (statuscode).
+         * @param   {Soap.EntityReference}  entityMoniker   The EntityReference of the record.
+         * @param   {Soap.OptionSetValue}   state           The state (statecode).
+         * @param   {Soap.OptionSetValue}   status          The status (statuscode).
          *
          * @return  A JQueryPromise&lt;Soap.SoapResponse&gt;
          */
-        static SetState(EntityMoniker: Soap.EntityReference, State: Soap.OptionSetValue, Status: Soap.OptionSetValue): JQueryPromise<Soap.SoapResponse>;
-        static SetState(EntityMoniker: Soap.EntityReference, State: number| Soap.OptionSetValue, Status: number| Soap.OptionSetValue): JQueryPromise<Soap.SoapResponse> {
-            var SetStateRequest: Soap.SetStateRequest;
-            if (typeof State === "number" && typeof Status === "number") { SetStateRequest = new Soap.SetStateRequest(EntityMoniker, State, Status); }
-            else { SetStateRequest = new Soap.SetStateRequest(EntityMoniker, <Soap.OptionSetValue> State, <Soap.OptionSetValue>Status); }
+        static SetState(entityMoniker: Soap.EntityReference, state: Soap.OptionSetValue, status: Soap.OptionSetValue): JQueryPromise<Soap.SoapResponse>;
+        static SetState(entityMoniker: Soap.EntityReference, state: number | Soap.OptionSetValue, status: number | Soap.OptionSetValue): JQueryPromise<Soap.SoapResponse> {
+            var setStateRequest: Soap.SetStateRequest;
+            if (typeof state === "number" && typeof status === "number") { setStateRequest = new Soap.SetStateRequest(entityMoniker, state, status); }
+            else { setStateRequest = new Soap.SetStateRequest(entityMoniker, <Soap.OptionSetValue>state, <Soap.OptionSetValue>status); }
             return $.Deferred<Soap.ExecuteResponse>(function (dfd) {
-                var Request = Soap.Execute<Soap.ExecuteResponse>(SetStateRequest);
-                Request.done(function (data, result, xhr) {
+                var request = Soap.Execute<Soap.ExecuteResponse>(setStateRequest);
+                request.done(function (data, result, xhr) {
                     dfd.resolve(data);
                 });
-                Request.fail(function (result) {
+                request.fail(function (result) {
                     dfd.reject(result);
                 });
             }).promise();
         }
-        private static DoRequest<T>(SoapBody: string, RequestType: string): JQueryPromise<T> {
-            var XML = "";
-            if (RequestType == "Execute") {
-                XML = "<s:Envelope xmlns:s = \"http://schemas.xmlsoap.org/soap/envelope/\">" +
-                "<s:Body>" + SoapBody + "</s:Body></s:Envelope>";
+        private static DoRequest<T>(soapBody: string, requestType: string): JQueryPromise<T> {
+            var xml = "";
+            if (requestType == "Execute") {
+                xml = "<s:Envelope xmlns:s = \"http://schemas.xmlsoap.org/soap/envelope/\">" +
+                    "<s:Body>" + soapBody + "</s:Body></s:Envelope>";
             }
             else {
-                SoapBody = "<" + RequestType + ">" + SoapBody + "</" + RequestType + ">";
+                soapBody = "<" + requestType + ">" + soapBody + "</" + requestType + ">";
                 //Add in all the different namespaces
-                XML = "<s:Envelope" + Soap.GetNameSpacesXML() + "><s:Body>" + SoapBody + "</s:Body></s:Envelope>";
+                xml = "<s:Envelope" + Soap.GetNameSpacesXML() + "><s:Body>" + soapBody + "</s:Body></s:Envelope>";
             }
 
             return $.Deferred<T>(function (dfd) {
                 var Request = $.ajax(XrmTSToolkit.Common.GetSoapServiceURL(), {
-                    data: XML,
+                    data: xml,
                     type: "POST",
                     beforeSend: function (xhr: JQueryXHR) {
                         xhr.setRequestHeader("Accept", "application/xml, text/xml, */*");
                         xhr.setRequestHeader("Content-Type", "text/xml; charset=utf-8");
-                        xhr.setRequestHeader("SOAPAction", "http://schemas.microsoft.com/xrm/2011/Contracts/Services/IOrganizationService/" + RequestType);
+                        xhr.setRequestHeader("SOAPAction", "http://schemas.microsoft.com/xrm/2011/Contracts/Services/IOrganizationService/" + requestType);
                     }
                 });
                 Request.done(function (data: any, textStatus: string, xhr: JQueryXHR) {
-                    var sr: any = new Soap.SoapResponse(xhr.responseText);
-                    dfd.resolve(<T>sr, textStatus, xhr);
+                    var sr: Soap.SoapResponse = null;
+                    var rt = xhr.responseText;
+                    switch (requestType) {
+                        case "Create":
+                            sr = new Soap.CreateSoapResponse(rt);
+                            break;
+                        case "Update":
+                            sr = new Soap.UpdateSoapResponse(rt);
+                            break;
+                        case "Delete":
+                            sr = new Soap.DeleteSoapResponse(rt);
+                            break;
+                        case "Retrieve":
+                            sr = new Soap.RetrieveSoapResponse(rt);
+                            break;
+                        case "RetrieveMultiple":
+                            sr = new Soap.RetrieveMultipleSoapResponse(rt);
+                            break;
+                        case "Execute":
+                            sr = new Soap.ExecuteResponse(rt);
+                            break;
+                        default:
+                            sr = new Soap.SoapResponse(rt);
+                            break;
+                    }
+                    sr.ParseResult();
+                    dfd.resolve(<T><any>sr, textStatus, xhr);
                 });
                 Request.fail(function (xhr: JQueryXHR, textStatus: string, exception) {
-                    var ErrorText = typeof exception === "undefined" ? textStatus : exception;
+                    var errorText = typeof exception === "undefined" ? textStatus : exception;
                     var fault = new Soap.FaultResponse(xhr.responseText);
-                    //if (fault && fault.Fault && fault.Fault.FaultString) {
-                    //    ErrorText += (": " + fault.Fault.FaultString);
-                    //}
+                    fault.ParseResult();
                     dfd.reject(fault);
                 });
             }).promise();
@@ -577,38 +614,271 @@ module XrmTSToolkit {
                 "l": "http://schemas.microsoft.com/xrm/2012/Contracts"
             };
 
-            var XML = xmlns;
+            var xml = xmlns;
             for (var i in ns) {
-                XML += " xmlns:" + i + "=\"" + ns[i] + "\"";
+                xml += " xmlns:" + i + "=\"" + ns[i] + "\"";
             }
-            return XML;
+            return xml;
         }
     }
     export module Soap {
         export interface ISerializable {
             Serialize(): string;
         }
-        export class Entity implements ISerializable {
+        export class SoapResponse {
+            constructor(public responseXML: string) { }
+            ParseResult(): void {
+                this.ParseResultInernal(this.responseXML);
+            }
+            PropertyTypes = new PropertyTypeCollection();
 
+            protected ParseResultInernal(responseXML: string): void {
+                console.time("  ParseResultInernal");
+                var xmlDoc = $.parseXML(responseXML);
+                console.time("  Parse Main Element");
+                var mainElement = XML.ParseNode(xmlDoc.firstChild);
+                console.timeEnd("  Parse Main Element");
+                while (mainElement && mainElement.Children && mainElement.Children[0] && (mainElement.Name == "Envelope" || mainElement.Name == "Body" || mainElement.Name == "ExecuteResponse")) {
+                    mainElement = mainElement.Children[0];
+                }
+
+                console.time("  Parse Main XRM Object");
+                var mainXRMObject = new XRMObject(mainElement, null);
+                console.timeEnd("  Parse Main XRM Object");
+
+                var parentObjects = new Array<any>();
+                parentObjects.push(this);
+                $.each(mainElement.Children, function (i, ChildNode) {
+                    console.time("  Parse Child XRM Object " + (i + 1));
+                    var xrmBaseObject = new XRMObject(ChildNode, mainXRMObject);
+                    SoapResponse.ParseXRMBaseObject(parentObjects, xrmBaseObject);
+                    console.timeEnd("  Parse Child XRM Object " + (i + 1));
+                });
+                console.timeEnd("  ParseResultInernal");
+            }
+
+            static ParseXRMBaseObject(parentObjects: Array<any>, xrmBaseObject: XRMObject): XRMObject {
+                var parentObject = parentObjects[parentObjects.length - 1];
+                var currentObject = SoapResponse.GetObjectFromBaseXRMObject(parentObjects, xrmBaseObject);
+                if (currentObject) {
+                    parentObjects.push(currentObject); //Push the current object as the next parent object
+                    if (parentObject instanceof Array) {
+                        parentObject.push(currentObject);
+                    }
+                    else {
+                        parentObject[xrmBaseObject.Name] = currentObject;
+                    }
+                    var childObjectsToProcess = new Array<XRMObject>();
+                    if (xrmBaseObject.Value instanceof Array) {
+                        $.each(xrmBaseObject.Value, function (index, Child: XRMObject) {
+                            childObjectsToProcess.push(Child);
+                        });
+                    }
+                    else if (xrmBaseObject.Value && !(typeof xrmBaseObject.Value === "string")) {
+                        var Child: XRMObject = xrmBaseObject.Value;
+                        childObjectsToProcess.push(Child);
+                    }
+
+                    if (childObjectsToProcess.length > 0) {
+                        var currentPropertyType = SoapResponse.GetPropertyTypeFromParent(parentObject, xrmBaseObject.Name);
+                        var childType: string = null;
+                        if (currentPropertyType && currentPropertyType.indexOf("[") == 0) {
+                            childType = currentPropertyType.substr(1, currentPropertyType.length - 2);
+                        }
+                        $.each(childObjectsToProcess, function (i, Child) {
+                            if (childType != null) { Child.TypeName = childType; }
+                            var childObject = SoapResponse.ParseXRMBaseObject(parentObjects, Child);
+                            if (childObject && xrmBaseObject.Name == "Results") {
+                                var result = childObject.Value;
+                                if (result === undefined) { result = childObject; }
+                                parentObject[Child.Name] = result;
+                            }
+                        });
+                    }
+
+                    //Populate the 'FormattedValues' of each of the attributes
+                    if (currentObject instanceof Soap.Entity && currentObject.FormattedValues) {
+                        for (var attributeName in currentObject.FormattedValues) {
+                            var attribute = currentObject.Attributes[attributeName];
+                            if (attribute instanceof AttributeValue)
+                                attribute.FormattedValue = (<Soap.Entity>currentObject).FormattedValues[attributeName];
+                        }
+                    }
+                    parentObjects.pop(); //Remove the current object as the last parent object
+                }
+                return currentObject;
+            }
+            static GetObjectFromBaseXRMObject(parentObjects: Array<any>, xrmBaseObject: XRMObject): any {
+                var parentObject = parentObjects[parentObjects.length - 1];
+                var currentObject = null;
+                var currentPropertyType = xrmBaseObject.TypeName;
+                if (currentPropertyType === undefined) {
+                    currentPropertyType = SoapResponse.GetPropertyTypeFromParent(parentObject, xrmBaseObject.Name);
+                }
+                if (currentPropertyType) {
+                    if (currentPropertyType == "s") {
+                        currentObject = xrmBaseObject.Value;
+                    } else if (currentPropertyType == "b") {
+                        currentObject = xrmBaseObject.Value == "true" ? true : false;
+                    } else if (currentPropertyType == "n") {
+                        currentObject = parseFloat(xrmBaseObject.Value);
+                    } else if (currentPropertyType == "f") {
+                        currentObject = parseFloat(xrmBaseObject.Value);
+                    } else if (currentPropertyType == "i") {
+                        currentObject = parseInt(xrmBaseObject.Value);
+                    } else if (currentPropertyType == "d") {
+                        currentObject = new Date(xrmBaseObject.Value);
+                    } else if (currentPropertyType == "Array" || currentPropertyType.indexOf("[") == 0) {
+                        currentObject = new Array();
+                    }
+                    else if (currentPropertyType == "AccessRights") {
+                        currentObject = new Array<AccessRights>();
+                        var rights: Array<string> = xrmBaseObject.Value.split(" ");
+                        $.each(rights, function (i, Right) {
+                            (<Array<AccessRights>>currentObject).push(AccessRights[Right]);
+                        });
+                    }
+                    else if (currentPropertyType == "AliasedValue") {
+                        currentObject = new Soap.AliasedValue();
+                    }
+                    else if (currentPropertyType == "boolean") {
+                        currentObject = new Soap.BooleanValue(xrmBaseObject.Value == "false" ? false : true);
+                    }
+                    else if (currentPropertyType == "double") {
+                        currentObject = new Soap.DoubleValue(parseFloat(xrmBaseObject.Value));
+                    }
+                    else if (currentPropertyType == "decimal") {
+                        currentObject = new Soap.DecimalValue(parseFloat(xrmBaseObject.Value));
+                    }
+                    else if (currentPropertyType == "dateTime") {
+                        if (xrmBaseObject.Value) {
+                            xrmBaseObject.Value = xrmBaseObject.Value.replaceAll("T", " ").replaceAll("-", "/");
+                        }
+                        currentObject = new Soap.DateValue(new Date(xrmBaseObject.Value));
+                    }
+                    else if (currentPropertyType == "EntityReference") {
+                        currentObject = new Soap.EntityReference(
+                            SoapResponse.FindArrayElementByName((<Array<XRMObject>>xrmBaseObject.Value), "Name", "Id").Value,
+                            SoapResponse.FindArrayElementByName((<Array<XRMObject>>xrmBaseObject.Value), "Name", "LogicalName").Value,
+                            SoapResponse.FindArrayElementByName((<Array<XRMObject>>xrmBaseObject.Value), "Name", "Name").Value
+                        );
+                        xrmBaseObject.Value = null;  //Prevents the parsing of the child values
+                    }
+                    else if (currentPropertyType == "EntityReferenceCollection") {
+                        currentObject = new EntityReferenceCollection();
+                    }
+                    else if (currentPropertyType == "float") {
+                        currentObject = new Soap.FloatValue(parseFloat(xrmBaseObject.Value));
+                    }
+                    else if (currentPropertyType == "guid") {
+                        currentObject = new Soap.GuidValue(xrmBaseObject.Value);
+                    }
+                    else if (currentPropertyType == "int") {
+                        currentObject = new Soap.IntegerValue(parseInt(xrmBaseObject.Value));
+                    }
+                    else if (currentPropertyType == "Money") {
+                        currentObject = new Soap.MoneyValue(parseFloat((<XRMObject>xrmBaseObject.Value).Value));
+                        xrmBaseObject.Value = null;  //Prevents the parsing of the child values
+                    }
+                    else if (currentPropertyType == "OptionSetValue") {
+                        currentObject = new Soap.OptionSetValue(parseFloat((<XRMObject>xrmBaseObject.Value).Value));
+                        xrmBaseObject.Value = null;  //Prevents the parsing of the child values
+                    }
+                    else if (currentPropertyType == "OrganizationResponseCollection") {
+                        currentObject = new Array<ExecuteMultipleResponseItem>();
+                    }
+                    else if (currentPropertyType == "string") {
+                        currentObject = new Soap.StringValue(xrmBaseObject.Value);
+                    }
+                    else if (currentPropertyType == "ManagedProperty") {
+                        currentObject = new Soap.ManagedProperty(
+                            (<Array<XRMObject>>xrmBaseObject.Value)[0].Value == "true",
+                            (<Array<XRMObject>>xrmBaseObject.Value)[1].Value == "true",
+                            (<Array<XRMObject>>xrmBaseObject.Value)[2].Value == "true"
+                        );
+                        xrmBaseObject.Value = null;  //Prevents the parsing of the child values
+                    }
+                    else {
+                        currentObject = SoapResponse.CreateObject(currentPropertyType);
+                    }
+                }
+                else if (xrmBaseObject.IsKeyValuePair) {
+                    currentObject = xrmBaseObject.Value;
+                }
+                else {
+                    currentObject = SoapResponse.CreateObject(xrmBaseObject.Name);
+                }
+                return currentObject;
+            }
+            private static CreateObject(ObjectType: string): any {
+                var currentObject = null;
+                try {
+                    currentObject = new Soap[ObjectType]();
+                }
+                catch (e1) {
+                    try {
+                        currentObject = new window[ObjectType]();
+                    }
+                    catch (e2) {
+                        if (!currentObject) {
+                            currentObject = {};
+                        }
+                    }
+                }
+                return currentObject;
+            }
+            private static GetPropertyTypeFromParent(parentObject: any, propertyName): string {
+                var type: string = null;
+                if (parentObject.hasOwnProperty("PropertyTypes")) {
+                    var PropertyTypes = <PropertyTypeCollection>parentObject.PropertyTypes;
+                    type = PropertyTypes[propertyName];
+                }
+                return type;
+            }
+            private static RemoveNameSpace(name: string): string {
+                var result = name;
+                if (result) {
+                    var IndexOfNamespace = result.indexOf(":");
+                    if (IndexOfNamespace >= 0) {
+                        result = result.substring(IndexOfNamespace + 1);
+                    }
+                }
+                return result;
+            }
+            private static FindArrayElementByName(array: Array<any>, elementName: string, name: string): any {
+                for (var index in array) {
+                    var item = array[index];
+                    if (item[elementName] == name)
+                        return item;
+                }
+            }
+        }
+        export class Entity implements ISerializable {
+            PropertyTypes = {
+                Attributes: "AttributeCollection",
+                FormattedValues: "Object",
+                LogicalName: "s",
+                Id: "s"
+            }
             constructor();
             /**
              * Constructor.
              *
-             * @param   {string}    LogicalName Logical Name of the entity.
+             * @param   {string}    logicalName Logical Name of the entity.
              */
-            constructor(LogicalName: string);
+            constructor(logicalName: string);
 
             /**
              * Constructor.
              *
-             * @param   {string}    LogicalName Logical Name of the entity.
-             * @param   {string}    Id          The GUID of the existing record.
+             * @param   {string}    logicalName Logical Name of the entity.
+             * @param   {string}    id          The GUID of the existing record.
              */
-            constructor(LogicalName: string, Id: string);
-            constructor(public LogicalName?: string, public Id?: string) {
+            constructor(logicalName: string, id: string);
+            constructor(public logicalName?: string, public id?: string) {
                 this.Attributes = new AttributeCollection();
-                if (!Id) {
-                    this.Id = "00000000-0000-0000-0000-000000000000";
+                if (!id) {
+                    this.id = "00000000-0000-0000-0000-000000000000";
                 }
             }
 
@@ -619,24 +889,27 @@ module XrmTSToolkit {
             Attributes: AttributeCollection;
             FormattedValues: StringDictionary<string>;
             Serialize(): string {
-                var Data: string = "<a:Attributes>";
-                for (var AttributeName in this.Attributes) {
-                    var Attribute = this.Attributes[AttributeName];
-                    Data += "<a:KeyValuePairOfstringanyType>";
-                    Data += "<b:key>" + AttributeName + "</b:key>";
-                    if (Attribute === null || Attribute.IsNull()) {
-                        Data += "<b:value i:nil=\"true\" />";
-                    }
-                    else {
-                        Data += Attribute.Serialize();
-                    }
-                    Data += "</a:KeyValuePairOfstringanyType>";
+                var data: string = "<a:Attributes>";
+                for (var attributeName in this.Attributes) {
+                    var attribute = this.Attributes[attributeName];
+                    data += "<a:KeyValuePairOfstringanyType>";
+                    data += "<b:key>" + attributeName + "</b:key>";
+                    if (attribute === null || (attribute instanceof AttributeValue && attribute.IsNull()))
+                        data += "<b:value i:nil=\"true\" />";
+                    else if (typeof attribute === "boolean")
+                        data += new BooleanValue(attribute).Serialize();
+                    else if (typeof attribute === "string")
+                        data += new StringValue(attribute).Serialize();
+                    else
+                        data += attribute.Serialize();
+
+                    data += "</a:KeyValuePairOfstringanyType>";
                 }
-                Data += "</a:Attributes><a:EntityState i:nil=\"true\" /><a:FormattedValues />";
-                Data += "<a:Id>" + Entity.EncodeValue(this.Id) + "</a:Id>";
-                Data += "<a:LogicalName>" + this.LogicalName + "</a:LogicalName>";
-                Data += "<a:RelatedEntities />";
-                return Data;
+                data += "</a:Attributes><a:EntityState i:nil=\"true\" /><a:FormattedValues />";
+                data += "<a:Id>" + Entity.EncodeValue(this.id) + "</a:Id>";
+                data += "<a:LogicalName>" + this.logicalName + "</a:LogicalName>";
+                data += "<a:RelatedEntities />";
+                return data;
             }
 
             static padNumber(s, len: number = 2): any {
@@ -651,13 +924,13 @@ module XrmTSToolkit {
                 return (typeof value === "object" && value.getTime) ? Entity.EncodeDate(value) : ((typeof (<any>window).CrmEncodeDecode != "undefined") ? (<any>window).CrmEncodeDecode.CrmXmlEncode(value) : Entity.CrmXmlEncode(value));
             }
 
-            static EncodeDate(Value: Date): string {
-                return Value.getFullYear() + "-" +
-                    Entity.padNumber(Value.getMonth() + 1) + "-" +
-                    Entity.padNumber(Value.getDate()) + "T" +
-                    Entity.padNumber(Value.getHours()) + ":" +
-                    Entity.padNumber(Value.getMinutes()) + ":" +
-                    Entity.padNumber(Value.getSeconds());
+            static EncodeDate(date: Date): string {
+                return date.getFullYear() + "-" +
+                    Entity.padNumber(date.getMonth() + 1) + "-" +
+                    Entity.padNumber(date.getDate()) + "T" +
+                    Entity.padNumber(date.getHours()) + ":" +
+                    Entity.padNumber(date.getMinutes()) + ":" +
+                    Entity.padNumber(date.getSeconds());
             }
 
             static CrmXmlEncode(s: string) {
@@ -728,8 +1001,9 @@ module XrmTSToolkit {
             Money,
             String,
         }
+        export class EntityReferenceCollection extends Array<Soap.EntityReference>{ }
         export class AttributeCollection {
-            [index: string]: AttributeValue;
+            [index: string]: AttributeValue | boolean | string;
         }
         export class ParameterCollection {
             [index: string]: ISerializable;
@@ -740,28 +1014,27 @@ module XrmTSToolkit {
         export class EntityCollection implements ISerializable {
             Items: Array<Entity> = [];
             Serialize(): string {
-                var XML = "";
-                $.each(this.Items, function (index, Entity) {
-                    XML += "<a:Entity>" + Entity.Serialize() + "</a:Entity>";
+                var xml = "";
+                $.each(this.Items, function (index, entity) {
+                    xml += "<a:Entity>" + entity.Serialize() + "</a:Entity>";
                 });
-                return XML;
+                return xml;
             }
         }
         export class ColumnSet implements ISerializable {
+            /**
+             * Constructor.
+             *
+             * @param   {Array{string}} columns to be retrieved.
+             */
+            constructor(columns: Array<string>);
 
             /**
              * Constructor.
              *
-             * @param   {Array{string}} Columns to be retrieved.
+             * @param   {boolean}   allColumns  'true' to return all available columns, otherwise 'false'. Default is 'false'
              */
-            constructor(Columns: Array<string>);
-
-            /**
-             * Constructor.
-             *
-             * @param   {boolean}   AllColumns  'true' to return all available columns, otherwise 'false'. Default is 'false'
-             */
-            constructor(AllColumns: boolean);
+            constructor(allColumns: boolean);
             constructor(p: any) {
                 if (typeof p === "boolean") {
                     this.AllColumns = p;
@@ -775,26 +1048,26 @@ module XrmTSToolkit {
             AllColumns: boolean = false;
             Columns: Array<string>;
 
-            AddColumn(Column: string): void { this.Columns.push(Column); }
-            AddColumns(Columns: Array<string>): void {
-                for (var Column in Columns) {
-                    this.AddColumn(Column);
+            AddColumn(column: string): void { this.Columns.push(column); }
+            AddColumns(columns: Array<string>): void {
+                for (var column in columns) {
+                    this.AddColumn(column);
                 }
             }
 
             Serialize(): string {
-                var Data: string = "<a:AllColumns>" + this.AllColumns.toString() + "</a:AllColumns>";
+                var data: string = "<a:AllColumns>" + this.AllColumns.toString() + "</a:AllColumns>";
                 if (this.Columns.length == 0) {
-                    Data += "<a:Columns />";
+                    data += "<a:Columns />";
                 }
                 else {
-                    Data += "<a:Columns>";
+                    data += "<a:Columns>";
                     $.each(this.Columns, function (i, Column) {
-                        Data += "<f:string>" + Column + "</f:string>";
+                        data += "<f:string>" + Column + "</f:string>";
                     });
-                    Data += "</a:Columns>";
+                    data += "</a:Columns>";
                 }
-                return Data;
+                return data;
             }
         }
         export class AttributeValue implements ISerializable {
@@ -811,27 +1084,31 @@ module XrmTSToolkit {
             constructor(public Value: EntityCollection) { super(Value, AttributeType.EntityCollection); }
             GetValueType(): string { return "a:ArrayOfEntity"; }
         }
-
         export class EntityReference extends AttributeValue {
+            PropertyTypes = {
+                Id: "s",
+                LogicalName: "s",
+                Name: "s"
+            }
             constructor();
 
             /**
              * Constructor.
              *
-             * @param   {string}    Id          The GUID of the record.
-             * @param   {string}    LogicalName Logical Name of the entity.
+             * @param   {string}    id          The GUID of the record.
+             * @param   {string}    logicalName Logical Name of the entity.
              */
-            constructor(Id: string, LogicalName: string);
+            constructor(id: string, logicalName: string);
 
             /**
              * Constructor.
              *
-             * @param   {string}    Id          The GUID of the record.
-             * @param   {string}    LogicalName Logical Name of the entity.
-             * @param   {string}    Name        The 'Display Name' of the record.
+             * @param   {string}    id          The GUID of the record.
+             * @param   {string}    logicalName Logical Name of the entity.
+             * @param   {string}    name        The 'Display Name' of the record.
              */
-            constructor(Id: string, LogicalName: string, Name: string);
-            constructor(public Id?: string, public LogicalName?: string, public Name?: string) { super(null, AttributeType.EntityReference); }
+            constructor(id: string, logicalName: string, name: string);
+            constructor(public id?: string, public entityType?: string, public name?: string) { super(null, AttributeType.EntityReference); }
             Serialize(): string {
                 return "<b:value i:type=\"a:EntityReference\"><a:Id>" +
                     Entity.EncodeValue(this.Id) +
@@ -840,305 +1117,124 @@ module XrmTSToolkit {
                     "</a:LogicalName><a:Name i:nil=\"true\" /></b:value>";
             }
             GetValueType(): string { return "a:EntityReference"; }
+            public get Id(): string {
+                return this.id;
+            }
+            public set Id(value: string) {
+                this.id = value;
+            }
+            public get LogicalName(): string {
+                return this.entityType;
+            }
+            public set LogicalName(value: string) {
+                this.entityType = value;
+            }
+            public get Name(): string {
+                return this.name;
+            }
+            public set Name(value: string) {
+                this.name = value;
+            }
         }
         export class OptionSetValue extends AttributeValue {
-            constructor(public Value?: number) { super(Value, AttributeType.OptionSetValue); }
+            constructor(public value?: number) { super(value, AttributeType.OptionSetValue); }
             Serialize(): string {
                 return "<b:value i:type=\"a:OptionSetValue\"><a:Value>" + this.GetEncodedValue() + "</a:Value></b:value>";
             }
             GetValueType(): string { return "a:OptionSetValue"; }
         }
         export class MoneyValue extends AttributeValue {
-            constructor(public Value?: number) { super(Value, AttributeType.Money); }
+            constructor(public value?: number) { super(value, AttributeType.Money); }
             Serialize(): string {
                 return "<b:value i:type=\"a:Money\"><a:Value>" + this.GetEncodedValue() + "</a:Value></b:value>";
             }
             GetValueType(): string { return "a:Money"; }
         }
         export class AliasedValue extends AttributeValue {
-            constructor(public Value?: AttributeValue, public AttributeLogicalName?: string, public EntityLogicalName?: string) { super(Value, AttributeType.AliasedValue); }
+            constructor(public value?: AttributeValue, public attributeLogicalName?: string, public entityLogicalName?: string) { super(value, AttributeType.AliasedValue); }
             Serialize(): string { throw "Update the 'Serialize' method of the 'AliasedValue'"; }
             GetValueType(): string { throw "Update the 'GetValueType' method of the 'AliasedValue'"; }
         }
         export class BooleanValue extends AttributeValue {
-            constructor(public Value?: boolean) { super(Value, AttributeType.Boolean); }
+            constructor(public value?: boolean) { super(value, AttributeType.Boolean); }
             GetValueType(): string { return "c:boolean"; }
         }
         export class IntegerValue extends AttributeValue {
-            constructor(public Value?: number) { super(Value, AttributeType.Integer); }
+            constructor(public value?: number) { super(value, AttributeType.Integer); }
             GetValueType(): string { return "c:int"; }
         }
         export class StringValue extends AttributeValue {
-            constructor(public Value?: string) { super(Value, AttributeType.String); }
+            constructor(public value?: string) { super(value, AttributeType.String); }
             GetValueType(): string { return "c:string"; }
         }
         export class DoubleValue extends AttributeValue {
-            constructor(public Value?: number) { super(Value, AttributeType.Double); }
+            constructor(public value?: number) { super(value, AttributeType.Double); }
             GetValueType(): string { return "c:double"; }
         }
         export class DecimalValue extends AttributeValue {
-            constructor(public Value?: number) { super(Value, AttributeType.Decimal); }
+            constructor(public value?: number) { super(value, AttributeType.Decimal); }
             GetValueType(): string { return "c:decimal"; }
         }
         export class FloatValue extends AttributeValue {
-            constructor(public Value?: number) { super(Value, AttributeType.Float); }
+            constructor(public value?: number) { super(value, AttributeType.Float); }
             GetValueType(): string { return "c:double"; }
         }
         export class DateValue extends AttributeValue {
-            constructor(public Value?: Date) { super(Value, AttributeType.Date); }
+            constructor(public value?: Date) { super(value, AttributeType.Date); }
             GetEncodedValue(): string {
-                return Entity.EncodeDate(this.Value);
+                return Entity.EncodeDate(this.value);
             }
             GetValueType(): string { return "c:dateTime"; }
         }
         export class GuidValue extends AttributeValue {
-            constructor(public Value?: string) {
-                super(Value, AttributeType.Guid);
-                if (!Value) {
-                    this.Value = "00000000-0000-0000-0000-000000000000";
+            constructor(public value?: string) {
+                super(value, AttributeType.Guid);
+                if (!value) {
+                    this.value = "00000000-0000-0000-0000-000000000000";
                 }
             }
             GetValueType(): string { return "e:guid"; }
         }
-        export class NodeValue {
-            constructor(public Name: string, public Value: any) { }
-        }
-        export class Collection {
-            constructor(public Items?: any) { }
-        }
-
-        export class SoapResponse {
-            constructor(ResponseXML: string) {
-                SoapResponse.ParseResult(ResponseXML, this);
-            }
-            static ParseResult(ResponseXML: string, ParentObject: SoapResponse): void {
-                var XMLDocTemp = $.parseXML(ResponseXML);
-                var MainElement = XML.ParseNode(XMLDocTemp.firstChild);
-
-                while (MainElement && MainElement.Children && MainElement.Children[0] && (MainElement.Name == "Envelope" || MainElement.Name == "Body" || MainElement.Name == "ExecuteResponse")) {
-                    MainElement = MainElement.Children[0];
-                }
-                var MainXRMObject = new XRMObject(MainElement, null);
-                $.each(MainElement.Children, function (i, ChildNode) {
-                    var XRMBaseObject = new XRMObject(ChildNode, MainXRMObject);
-                    SoapResponse.ParseXRMBaseObject(ParentObject, XRMBaseObject);
-                });
-            }
-
-            static ParseXRMBaseObject(ParentObject: any, XRMBaseObject: XRMObject): XRMObject {
-                var CurrentObject = SoapResponse.GetObjectFromBaseXRMObject(XRMBaseObject);
-                if (CurrentObject) {
-                    if (ParentObject instanceof Array) {
-                        ParentObject.push(CurrentObject);
-                    }
-                    else {
-                        if (ParentObject.hasOwnProperty(XRMBaseObject.Name)) {
-                            try {
-                                //This object already has the property - try to parse it into the correct type
-                                if (typeof ParentObject[XRMBaseObject.Name] === "number") {
-                                    ParentObject[XRMBaseObject.Name] = parseFloat(CurrentObject);
-                                }
-                                else if (typeof ParentObject[XRMBaseObject.Name] === "boolean") {
-                                    ParentObject[XRMBaseObject.Name] = CurrentObject == "true" ? true : false;
-                                }
-                                else if (typeof ParentObject[XRMBaseObject.Name] === "dateTime") {
-                                    ParentObject[XRMBaseObject.Name] = new Date(CurrentObject);
-                                }
-                                else {
-                                    ParentObject[XRMBaseObject.Name] = CurrentObject;
-                                }
-                            }
-                            catch (e) {
-                                ParentObject[XRMBaseObject.Name] = CurrentObject;
-                            }
-                        }
-                        else {
-                            ParentObject[XRMBaseObject.Name] = CurrentObject;
-                        }
-                    }
-                    var ChildObjectsToProcess = new Array<XRMObject>();
-                    if (XRMBaseObject.Value instanceof Array) {
-                        $.each(XRMBaseObject.Value, function (index, Child: XRMObject) {
-                            ChildObjectsToProcess.push(Child);
-                        });
-                    }
-                    else if (XRMBaseObject.Value && !(typeof XRMBaseObject.Value === "string")) {
-                        var Child: XRMObject = XRMBaseObject.Value;
-                        ChildObjectsToProcess.push(Child);
-                    }
-
-                    if (ChildObjectsToProcess.length > 0) {
-                        $.each(ChildObjectsToProcess, function (i, Child) {
-                            var ChildObject = SoapResponse.ParseXRMBaseObject(CurrentObject, Child);
-                            if (XRMBaseObject.Name == "Results") {
-                                var ResultValue = ChildObject.Value;
-                                if (!ResultValue) { ResultValue = ChildObject; }
-                                ParentObject[Child.Name] = ResultValue;
-                            }
-                        });
-                    }
-
-                    //Populate the 'FormattedValues' of each of the attributes
-                    if (CurrentObject instanceof Soap.Entity && (<Soap.Entity>CurrentObject).FormattedValues) {
-                        for (var AttributeName in (<Soap.Entity>CurrentObject).FormattedValues) {
-                            (<Soap.Entity>CurrentObject).Attributes[AttributeName].FormattedValue = (<Soap.Entity>CurrentObject).FormattedValues[AttributeName];
-                        }
-                    }
-
-                }
-                return CurrentObject;
-            }
-            static GetObjectFromBaseXRMObject(XRMBaseObject: XRMObject): any {
-                var CurrentObject = null;
-                switch (XRMBaseObject.TypeName) {
-                    case "Object":
-                    case "Array":
-                    case "KeyValueArray":
-                        //Could be an object or Array
-                        switch (XRMBaseObject.Name) {
-                            case "Entities":
-                            case "EntityCollection":
-                                CurrentObject = new Array<Entity>();
-                                break;
-                            case "Attributes":
-                                CurrentObject = new AttributeCollection();
-                                break;
-                            case "EntityReferenceCollection":
-                                CurrentObject = [];
-                                break;
-                            case "Entity":
-                                CurrentObject = new Soap.Entity();
-                                break;
-                            case "RetrieveMultipleResult":
-                                CurrentObject = new Soap.RetrieveMultipleResult();
-                                break;
-                            default:
-                                if (typeof XRMBaseObject.Value === "string") {
-                                    CurrentObject = XRMBaseObject.Value;
-                                }
-                                else {
-                                    CurrentObject = {};
-                                }
-                        }
-                        break;
-                    case "OrganizationResponseCollection":
-                        CurrentObject = new Array<ExecuteMultipleResponseItem>();
-                        break;
-                    case "EntityReference":
-                        CurrentObject = new Soap.EntityReference(
-                            (<Array<XRMObject>>XRMBaseObject.Value)[0].Value,
-                            (<Array<XRMObject>>XRMBaseObject.Value)[1].Value,
-                            (<Array<XRMObject>>XRMBaseObject.Value)[2].Value
-                            );
-                        XRMBaseObject.Value = null;  //Prevents the parsing of the child values
-                        break;
-                    case "OptionSetValue":
-                        CurrentObject = new Soap.OptionSetValue(parseFloat((<XRMObject>XRMBaseObject.Value).Value));
-                        XRMBaseObject.Value = null;  //Prevents the parsing of the child values
-                        break;
-                    case "Money":
-                        CurrentObject = new Soap.MoneyValue(parseFloat((<XRMObject>XRMBaseObject.Value).Value));
-                        XRMBaseObject.Value = null;  //Prevents the parsing of the child values
-                        break;
-                    case "AliasedValue":
-                        CurrentObject = new Soap.AliasedValue();
-                        break;
-                    case "int":
-                        CurrentObject = new Soap.IntegerValue(parseInt(XRMBaseObject.Value));
-                        break;
-                    case "double":
-                        CurrentObject = new Soap.DoubleValue(parseFloat(XRMBaseObject.Value));
-                        break;
-                    case "float":
-                        CurrentObject = new Soap.FloatValue(parseFloat(XRMBaseObject.Value));
-                        break;
-                    case "decimal":
-                        CurrentObject = new Soap.DecimalValue(parseFloat(XRMBaseObject.Value));
-                        break;
-                    case "dateTime":
-                        //Parse the date value
-                        if (XRMBaseObject.Value) {
-                            XRMBaseObject.Value = XRMBaseObject.Value.replaceAll("T", " ").replaceAll("-", "/");
-                        }
-                        CurrentObject = new Soap.DateValue(new Date(XRMBaseObject.Value));
-                        break;
-                    case "boolean":
-                        CurrentObject = new Soap.BooleanValue(XRMBaseObject.Value == "false" ? false : true);
-                        break;
-                    case "string":
-                        CurrentObject = new Soap.StringValue(XRMBaseObject.Value);
-                        break;
-                    case "guid":
-                        CurrentObject = new Soap.GuidValue(XRMBaseObject.Value);
-                        break;
-                    case "AccessRights":
-                        CurrentObject = new Array<AccessRights>();
-                        var Rights: Array<string> = XRMBaseObject.Value.split(" ");
-                        $.each(Rights, function (i, Right) {
-                            (<Array<AccessRights>>CurrentObject).push(AccessRights[Right]);
-                        });
-                        break;
-                    default:
-                        CurrentObject = {};
-                }
-                return CurrentObject;
-            }
-            static RemoveNameSpace(Name: string): string {
-                var Return = Name;
-                if (Return) {
-                    var IndexOfNamespace = Return.indexOf(":");
-                    if (IndexOfNamespace >= 0) {
-                        Return = Return.substring(IndexOfNamespace + 1);
-                    }
-                }
-                return Return;
-            }
-
-        }
-
         class XRMObject {
-            constructor(Element: XML.XMLElement, Parent: XRMObject) {
-                this.Parent = Parent;
-                if (Element.Name && Element.Name.indexOf("KeyValuePair") == 0) {
+            constructor(element: XML.XMLElement, parent: XRMObject) {
+                this.Parent = parent;
+                if (element.Name && element.Name.indexOf("KeyValuePair") == 0) {
                     //This is a key value pair - so the Name and Value are actually the first and second children
-                    Parent.TypeName = "KeyValueArray";
-                    this.Name = Element.Children[0].Text;
+                    this.Name = element.Children[0].Text;
                     this.IsKeyValuePair = true;
-                    if (Element.Children[1].Text) {
-                        this.Value = Element.Children[1].Text;
-                        this.TypeName = Element.Children[1].TypeName;
+                    if (element.Children[1].Text) {
+                        this.Value = element.Children[1].Text;
+                        this.TypeName = element.Children[1].TypeName;
                     }
-                    else if (Element.Children[1].Children.length == 1) {
-                        if (Element.Children[1].Name === "value" && (Element.Children[1].Children[0])) { this.Value = new XRMObject(Element.Children[1].Children[0], this); }
-                        else { this.Value = new XRMObject(Element.Children[1], this); }
-                        this.TypeName = Element.Children[1].TypeName;
+                    else if (element.Children[1].Children.length == 1) {
+                        if (element.Children[1].Name === "value" && (element.Children[1].Children[0])) { this.Value = new XRMObject(element.Children[1].Children[0], this); }
+                        else { this.Value = new XRMObject(element.Children[1], this); }
+                        this.TypeName = element.Children[1].TypeName;
                     }
                     else {
                         this.Value = [];
-                        var _Value = this.Value;
-                        this.TypeName = Element.Children[1].TypeName != "Object" ? Element.Children[1].TypeName : "Array";
-                        $.each(Element.Children[1].Children, function (index, ChildNode) {
-                            _Value.push(new XRMObject(ChildNode, this));
+                        var value = this.Value;
+                        this.TypeName = element.Children[1].TypeName;
+                        $.each(element.Children[1].Children, function (index, ChildNode) {
+                            value.push(new XRMObject(ChildNode, this));
                         });
                     }
                 }
                 else {
-                    //Determine the type of object by examining the children
-                    this.Name = Element.Name;
-                    if (Element.Text || Element.Children.length == 0) {
-                        this.Value = Element.Text;
-                        this.TypeName = Element.TypeName ? Element.TypeName : "Object";
+                    this.Name = element.Name;
+                    this.TypeName = element.TypeName;
+                    if (element.Text || element.Children.length == 0) {
+                        this.Value = element.Text;
+                        this.TypeName = element.TypeName;
                     }
-                    else if (Element.Children.length == 1) {
-                        this.Value = new XRMObject(Element.Children[0], this);
-                        this.TypeName = "Object";
+                    else if (element.Children.length == 1) {
+                        this.Value = new XRMObject(element.Children[0], this);
                     }
                     else {
                         this.Value = [];
-                        var _Value = this.Value;
-                        this.TypeName = "Array"; //Element.TypeName != "Object" ? Element.TypeName : "Array";
-                        $.each(Element.Children, function (index, ChildNode) {
-                            _Value.push(new XRMObject(ChildNode, this));
+                        var value = this.Value;
+                        $.each(element.Children, function (index, ChildNode) {
+                            value.push(new XRMObject(ChildNode, this));
                         });
                     }
                 }
@@ -1149,41 +1245,69 @@ module XrmTSToolkit {
             IsKeyValuePair: boolean = false;
             Parent: XRMObject;
         }
-
-
-
-        export class SDKResponse { }
-        export class CreateSoapResponse extends SDKResponse {
+        export class CreateSoapResponse extends SoapResponse {
+            constructor(responseXML: string) {
+                super(responseXML);
+                this.PropertyTypes["CreateResult"] = "s";
+            }
             /** The GUID of the newly created record. */
             CreateResult: string;
         }
-        export class UpdateSoapResponse extends SDKResponse { }
-        export class DeleteSoapResponse extends SDKResponse { }
-        export class RetrieveSoapResponse extends SDKResponse {
+        export class UpdateSoapResponse extends SoapResponse { }
+        export class DeleteSoapResponse extends SoapResponse { }
+        export class RetrieveSoapResponse extends SoapResponse {
+            constructor(responseXML: string) {
+                super(responseXML);
+                this.PropertyTypes["RetrieveResult"] = "Entity";
+            }
             /** The retrieved Soap.Entity */
             RetrieveResult: Entity;
         }
-        export class RetrieveMultipleSoapResponse extends SDKResponse {
+        export class RetrieveMultipleSoapResponse extends SoapResponse {
             RetrieveMultipleResult: RetrieveMultipleResult;
         }
         export class RetrieveMultipleResult {
+            PropertyTypes = {
+                Entities: "[Entity]",
+                EntityName: "s",
+                MoreRecords: "b",
+                PagingCookie: "s",
+                TotalRecordCount: "n",
+                TotalRecordCountLimitExceeded: "b",
+                MinActiveRowVersion: "n"
+            }
             Entities: Array<Entity>;
             EntityName: string;
             MoreRecords: boolean = false;
             PagingCookie: string;
             TotalRecordCount: number;
             TotalRecordCountLimitExceeded: boolean;
+            MinActiveRowVersion: number;
         }
         export class FaultResponse extends SoapResponse {
-            constructor(ResponseXML: string) { super(ResponseXML); }
+            constructor(responseXML: string) {
+                super(responseXML);
+                this.PropertyTypes["detail"] = "FaultDetail";
+                this.PropertyTypes["faultcode"] = "s";
+                this.PropertyTypes["faultstring"] = "s";
+            }
             detail: FaultDetail;
             faultcode: string;
             faultstring: string;
         }
         export class FaultDetail {
+            PropertyTypes = {
+                OrganizationServiceFault: "Fault"
+            }
             OrganizationServiceFault: Fault;
         }
         export class Fault {
+            PropertyTypes = {
+                ErrorCode: "s",
+                InnerFault: "Fault",
+                Message: "s",
+                Timestamp: "s"
+            }
             ErrorCode: string;
             ErrorDetails: any;
             InnerFault: Fault;
@@ -1195,13 +1319,12 @@ module XrmTSToolkit {
 
     export module Soap.Query {
         export class QueryExpression {
-
             /**
              * Constructor.
              *
              * @param   {string}    EntityName  Logical Name of the entity.
              */
-            constructor(public EntityName?: string) { }
+            constructor(public entityName?: string) { }
 
             Columns: ColumnSet = new ColumnSet(false);
             Criteria: FilterExpression = null;
@@ -1212,56 +1335,56 @@ module XrmTSToolkit {
 
             serialize(): string {
                 //Query
-                var Data: string = "<query i:type=\"a:QueryExpression\">";
+                var data: string = "<query i:type=\"a:QueryExpression\">";
 
                 //Columnset
-                Data += "<a:ColumnSet>" + this.Columns.Serialize() + "</a:ColumnSet>";
+                data += "<a:ColumnSet>" + this.Columns.Serialize() + "</a:ColumnSet>";
 
                 //Criteria - Serailize the FilterExpression
                 if (this.Criteria == null) {
-                    Data += "<a:Criteria i:nil=\"true\"/>";
+                    data += "<a:Criteria i:nil=\"true\"/>";
                 }
                 else {
-                    Data += "<a:Criteria>";
-                    Data += this.Criteria.serialize();
-                    Data += "</a:Criteria>";
+                    data += "<a:Criteria>";
+                    data += this.Criteria.serialize();
+                    data += "</a:Criteria>";
                 }
 
-                Data += "<a:Distinct>false</a:Distinct>";
-                Data += "<a:EntityName>" + this.EntityName + "</a:EntityName>";
+                data += "<a:Distinct>false</a:Distinct>";
+                data += "<a:EntityName>" + this.entityName + "</a:EntityName>";
 
                 //Link Entities
                 if (this.LinkEntities.length == 0) {
-                    Data += "<a:LinkEntities />";
+                    data += "<a:LinkEntities />";
                 }
                 else {
-                    Data += "<a:LinkEntities>";
+                    data += "<a:LinkEntities>";
                     $.each(this.LinkEntities, function (index, LinkEntity) {
-                        Data += LinkEntity.serialize();
+                        data += LinkEntity.serialize();
                     });
-                    Data += "</a:LinkEntities>";
+                    data += "</a:LinkEntities>";
                 }
                    
                 //Sorting
                 if (this.Orders.length == 0) {
-                    Data += "<a:Orders />";
+                    data += "<a:Orders />";
                 }
                 else {
-                    Data += "<a:Orders>";
+                    data += "<a:Orders>";
                     $.each(this.Orders, function (index, Order) {
-                        Data += Order.serialize();
+                        data += Order.serialize();
                     });
-                    Data += "</a:Orders>";
+                    data += "</a:Orders>";
                 }
 
                 //Page Info
-                Data += this.PageInfo.serialize();
+                data += this.PageInfo.serialize();
 
                 //No Lock
-                Data += "<a:NoLock>" + this.NoLock.toString() + "</a:NoLock>";
+                data += "<a:NoLock>" + this.NoLock.toString() + "</a:NoLock>";
 
-                Data += "</query>";
-                return Data;
+                data += "</query>";
+                return data;
             }
         }
         export class FilterExpression {
@@ -1270,11 +1393,11 @@ module XrmTSToolkit {
             /**
              * Constructor.
              *
-             * @param   {LogicalOperator}   FilterOperator  The filter operator.
+             * @param   {LogicalOperator}   filterOperator  The filter operator.
              */
-            constructor(FilterOperator: LogicalOperator);
-            constructor(FilterOperator?: LogicalOperator) {
-                if (FilterOperator === undefined) {
+            constructor(filterOperator: LogicalOperator);
+            constructor(filterOperator?: LogicalOperator) {
+                if (filterOperator === undefined) {
                     this.FilterOperator = LogicalOperator.And;
                 }
             }
@@ -1303,82 +1426,80 @@ module XrmTSToolkit {
             IsQuickFindFilter: boolean = false;
 
             serialize(): string {
-                var Data: string = "<a:Conditions>";
+                var data: string = "<a:Conditions>";
                 //Conditions
                 $.each(this.Conditions, function (i, Condition) {
-                    Data += Condition.serialize();
+                    data += Condition.serialize();
                 });
-                Data += "</a:Conditions>";
+                data += "</a:Conditions>";
 
                 //Filter Operator
-                Data += "<a:FilterOperator>" + LogicalOperator[this.FilterOperator].toString() + "</a:FilterOperator>";
+                data += "<a:FilterOperator>" + LogicalOperator[this.FilterOperator].toString() + "</a:FilterOperator>";
 
                 //Filters
                 if (this.Filters.length == 0) {
-                    Data += "<a:Filters/>";
+                    data += "<a:Filters/>";
                 }
                 else {
-                    Data += "<a:Filters>";
+                    data += "<a:Filters>";
                     $.each(this.Filters, function (i, Filter) {
-                        Data += "<a:FilterExpression>"
-                        Data += Filter.serialize();
-                        Data += "</a:FilterExpression>";
+                        data += "<a:FilterExpression>"
+                        data += Filter.serialize();
+                        data += "</a:FilterExpression>";
                     });
-                    Data += "</a:Filters>";
+                    data += "</a:Filters>";
                 }
 
                 //IsQuickFindFilter
-                Data += "<a:IsQuickFindFilter>" + this.IsQuickFindFilter.toString() + "</a:IsQuickFindFilter>";
-                return Data;
+                data += "<a:IsQuickFindFilter>" + this.IsQuickFindFilter.toString() + "</a:IsQuickFindFilter>";
+                return data;
             }
         }
-
         export class ConditionExpression {
             constructor();
 
             /**
              * Constructor.
              *
-             * @param   {string}    AttributeName       Name of the attribute.
-             * @param   {ConditionOperator} Operator    The comparison operator.
-             * @param   {AttributeValue}    Value       The value to be compared to.
+             * @param   {string}    attributeName       Name of the attribute.
+             * @param   {ConditionOperator} operator    The comparison operator.
+             * @param   {AttributeValue}    value       The value to be compared to.
              */
-            constructor(AttributeName: string, Operator: ConditionOperator, Value?: AttributeValue);
+            constructor(attributeName: string, operator: ConditionOperator, value?: AttributeValue);
 
             /**
              * Constructor.
              *
-             * @param   {string}    AttributeName       Name of the attribute.
-             * @param   {ConditionOperator} Operator    The comparison operator.
-             * @param   {Array{AttributeValue}} Values  The values to be compared to.
+             * @param   {string}    attributeName       Name of the attribute.
+             * @param   {ConditionOperator} operator    The comparison operator.
+             * @param   {Array{AttributeValue}} values  The values to be compared to.
              */
-            constructor(AttributeName: string, Operator: ConditionOperator, Values?: Array<AttributeValue>);
-            constructor(public AttributeName?: string, public Operator?: ConditionOperator, Values?: any) {
-                if (Values instanceof Array) {
-                    this.Values = Values;
+            constructor(attributeName: string, operator: ConditionOperator, values?: Array<AttributeValue>);
+            constructor(public attributeName?: string, public operator?: ConditionOperator, values?: any) {
+                if (values instanceof Array) {
+                    this.Values = values;
                 }
                 else {
-                    this.Values.push(Values);
+                    this.Values.push(values);
                 }
             }
 
             Values: Array<AttributeValue> = [];
 
             serialize(): string {
-                var Data: string =
+                var data: string =
                     "<a:ConditionExpression>" +
-                    "<a:AttributeName>" + this.AttributeName + "</a:AttributeName>" +
-                    "<a:Operator>" + ConditionOperator[this.Operator].toString() + "</a:Operator>" +
+                    "<a:AttributeName>" + this.attributeName + "</a:AttributeName>" +
+                    "<a:Operator>" + ConditionOperator[this.operator].toString() + "</a:Operator>" +
                     "<a:Values>";
-                $.each(this.Values, function (i, Value) {
-                    Data += "<f:anyType i:type=\"" + Value.GetValueType() + "\">" + Value.GetEncodedValue() + "</f:anyType>";
+                $.each(this.Values, function (i, value) {
+                    data += "<f:anyType i:type=\"" + value.GetValueType() + "\">" + value.GetEncodedValue() + "</f:anyType>";
                 });
-                Data += "</a:Values>" +
-                "</a:ConditionExpression>";
-                return Data;
+                data += "</a:Values>" +
+                    "</a:ConditionExpression>";
+                return data;
             }
         }
-
         export class PageInfo {
             constructor() { }
             Count: number = 0;
@@ -1387,61 +1508,58 @@ module XrmTSToolkit {
             ReturnTotalRecordCount: boolean = false;
 
             serialize(): string {
-                var Data: string = "" +
+                var data: string = "" +
                     "<a:PageInfo>" +
                     "<a:Count>" + this.Count.toString() + "</a:Count>" +
                     "<a:PageNumber>" + this.PageNumber.toString() + "</a:PageNumber>";
                 if (this.PagingCookie == null) {
-                    Data += "<a:PagingCookie i:nil = \"true\" />";
+                    data += "<a:PagingCookie i:nil = \"true\" />";
                 }
                 else {
-                    Data += "<a:PagingCookie>" + this.PagingCookie + "</a:PagingCookie>";
+                    data += "<a:PagingCookie>" + this.PagingCookie + "</a:PagingCookie>";
                 }
-                Data += "<a:ReturnTotalRecordCount>" + this.ReturnTotalRecordCount.toString() + "</a:ReturnTotalRecordCount></a:PageInfo>";
-                return Data;
+                data += "<a:ReturnTotalRecordCount>" + this.ReturnTotalRecordCount.toString() + "</a:ReturnTotalRecordCount></a:PageInfo>";
+                return data;
             }
         }
-
         export class OrderExpression {
             constructor();
 
             /**
              * Constructor.
              *
-             * @param   {string}    AttributeName   Name of the attribute.
-             * @param   {OrderType} OrderType       Type of the order.
+             * @param   {string}    attributeName   Name of the attribute.
+             * @param   {OrderType} orderType       Type of the order.
              */
-            constructor(AttributeName: string, OrderType: OrderType);
-            constructor(public AttributeName?: string, public OrderType?: OrderType) { }
+            constructor(attributeName: string, orderType: OrderType);
+            constructor(public attributeName?: string, public orderType?: OrderType) { }
             serialize(): string {
-                var Data: string = "<a:OrderExpression>";
-                Data += "<a:AttributeName>" + this.AttributeName + "</a:AttributeName>";
-                Data += "<a:OrderType>" + OrderType[this.OrderType].toString() + "</a:OrderType>";
-                Data += "</a:OrderExpression>";
-                return Data;
+                var data: string = "<a:OrderExpression>";
+                data += "<a:AttributeName>" + this.attributeName + "</a:AttributeName>";
+                data += "<a:OrderType>" + OrderType[this.orderType].toString() + "</a:OrderType>";
+                data += "</a:OrderExpression>";
+                return data;
             }
         }
-
         export class LinkEntity {
 
             /**
              * Constructor.
              *
-             * @param   {string}    LinkFromEntityName                  LogicalName of the link from entity.
-             * @param   {string}    LinkToEntityName                    LogicalName of the link to entity.
-             * @param   {string}    LinkFromAttributeName               LogicalName of the link from
+             * @param   {string}    linkFromEntityName                  LogicalName of the link from entity.
+             * @param   {string}    linkToEntityName                    LogicalName of the link to entity.
+             * @param   {string}    linkFromAttributeName               LogicalName of the link from
              *                                                          attribute.
-             * @param   {string}    LinkToAttributeName                 LogicalName of the link to attribute.
-             * @param   {JoinOperator}  optional public JoinOperator    JoinOperator    The optional join
+             * @param   {string}    linkToAttributeName                 LogicalName of the link to attribute.
+             * @param   {JoinOperator}  optional public joinOperator    JoinOperator    The optional join
              *                                                          operator.
              */
-
             constructor(
-                public LinkFromEntityName: string,
-                public LinkToEntityName: string,
-                public LinkFromAttributeName: string,
-                public LinkToAttributeName: string,
-                public JoinOperator: JoinOperator = Soap.Query.JoinOperator.Inner) { }
+                public linkFromEntityName: string,
+                public linkToEntityName: string,
+                public linkFromAttributeName: string,
+                public linkToAttributeName: string,
+                public joinOperator: JoinOperator = Soap.Query.JoinOperator.Inner) { }
 
             Columns: ColumnSet = new ColumnSet(false);
             EntityAlias: string = null;
@@ -1449,53 +1567,49 @@ module XrmTSToolkit {
             LinkEntities: Array<LinkEntity> = [];
 
             serialize(): string {
-                var Data: string = "<a:LinkEntity>";
-                Data += this.Columns.Serialize();
+                var data: string = "<a:LinkEntity>";
+                data += this.Columns.Serialize();
                 if (this.EntityAlias == null) {
-                    Data += "<a:EntityAlias i:nil=\"true\"/>";
+                    data += "<a:EntityAlias i:nil=\"true\"/>";
                 }
                 else {
-                    Data += "<a:EntityAlias>" + this.EntityAlias + "</a:EntityAlias>";
+                    data += "<a:EntityAlias>" + this.EntityAlias + "</a:EntityAlias>";
                 }
-                Data += "<a:JoinOperator>" + JoinOperator[this.JoinOperator].toString() + "</a:JoinOperator>";
-                Data += " <a:LinkCriteria>";
-                Data += this.LinkCriteria.serialize();
-                Data += "</a:LinkCriteria>";
+                data += "<a:JoinOperator>" + JoinOperator[this.joinOperator].toString() + "</a:JoinOperator>";
+                data += " <a:LinkCriteria>";
+                data += this.LinkCriteria.serialize();
+                data += "</a:LinkCriteria>";
                 if (this.LinkEntities.length == 0) {
-                    Data += "<a:LinkEntities />";
+                    data += "<a:LinkEntities />";
                 }
                 else {
-                    Data += "<a:LinkEntities>";
-                    $.each(this.LinkEntities, function (index, LinkEntity) {
-                        Data += LinkEntity.serialize();
+                    data += "<a:LinkEntities>";
+                    $.each(this.LinkEntities, function (index, linkEntity) {
+                        data += linkEntity.serialize();
                     });
-                    Data += "</a:LinkEntities>";
+                    data += "</a:LinkEntities>";
                 }
-                Data += "<a:LinkFromAttributeName>" + this.LinkFromAttributeName + "</a:LinkFromAttributeName>";
-                Data += "<a:LinkFromEntityName>" + this.LinkFromEntityName + "</a:LinkFromEntityName>";
-                Data += "<a:LinkToAttributeName>" + this.LinkToAttributeName + "</a:LinkToAttributeName>";
-                Data += "<a:LinkToEntityName>" + this.LinkToEntityName + "</a:LinkToEntityName>";
-                Data += "</a:LinkEntity>";
-                return Data;
+                data += "<a:LinkFromAttributeName>" + this.linkFromAttributeName + "</a:LinkFromAttributeName>";
+                data += "<a:LinkFromEntityName>" + this.linkFromEntityName + "</a:LinkFromEntityName>";
+                data += "<a:LinkToAttributeName>" + this.linkToAttributeName + "</a:LinkToAttributeName>";
+                data += "<a:LinkToEntityName>" + this.linkToEntityName + "</a:LinkToEntityName>";
+                data += "</a:LinkEntity>";
+                return data;
             }
         }
-
         export enum JoinOperator {
             Inner = 0,
             LeftOuter = 1,
             Natural = 2
         }
-
         export enum OrderType {
             Ascending = 0,
             Descending = 1
         }
-
         export enum LogicalOperator {
             And = 0,
             Or = 1
         }
-
         export enum ConditionOperator {
             Equal = 0,
             NotEqual = 1,
@@ -1583,75 +1697,90 @@ module XrmTSToolkit {
         }
     }
     export module Soap {
-        //These are all the Organization Requests and Responses
-        export class ExecuteResponse extends SoapResponse {
-            Results: AttributeCollection;
+        export class PropertyTypeCollection {
+            [index: string]: string;
         }
-
+        //These are all the Organization Requests and Responses
         export class ExecuteRequest {
 
             /**
              * Constructor.
              *
-             * @param   {string}    RequestName             Name of the request.
-             * @param   {string}    RequestType             Type of the request. Required if Request type
+             * @param   {string}    requestName             Name of the request.
+             * @param   {string}    requestType             Type of the request. Required if Request type
              *                                              differs from pattern: "[RequestName]Type" or if
              *                                              the RequestType namesapce differs from "g" in the
              *                                              global list of namespaces.
-             * @param   {ParameterCollection}   Parameters  Parameters for the operation.
+             * @param   {ParameterCollection}   parameters  Parameters for the operation.
              */
-
-            constructor(public RequestName: string, public RequestType?: string, public Parameters?: ParameterCollection) {
-                if (!Parameters || Parameters == null) {
-                    this.Parameters = new AttributeCollection();
+            constructor(public requestName: string, public requestType?: string, public parameters?: ParameterCollection) {
+                if (!parameters || parameters == null) {
+                    this.parameters = new ParameterCollection();
                 }
-                if (!RequestType || RequestType == null) {
-                    this.RequestType = "g:" + this.RequestName + "Request";
+                if (!requestType || requestType == null) {
+                    this.requestType = "g:" + this.requestName + "Request";
                 }
             }
             RequestId: string;
             ExecuteRequestType: string = "request";
             IncludeExecuteHeader: boolean = true;
             Serialize(): string {
-                var XML = "";
-                if (this.IncludeExecuteHeader) { XML += "<Execute" + Soap.GetNameSpacesXML() + ">"; }
-                XML += "<" + this.ExecuteRequestType + " i:type='" + this.RequestType + "'><a:Parameters>";
-                for (var ParameterName in this.Parameters) {
-                    var Parameter = this.Parameters[ParameterName];
+                var xml = "";
+                if (this.IncludeExecuteHeader) { xml += "<Execute" + Soap.GetNameSpacesXML() + ">"; }
+                xml += "<" + this.ExecuteRequestType + " i:type='" + this.requestType + "'><a:Parameters>";
+                for (var parameterName in this.parameters) {
+                    var parameter = this.parameters[parameterName];
 
-                    XML += "<a:KeyValuePairOfstringanyType>";
-                    XML += "<b:key>" + ParameterName + "</b:key>";
-                    if (Parameter instanceof Soap.Entity) {
-                        XML += "<b:value i:type=\"a:Entity\">" + Parameter.Serialize() + "</b:value>";
+                    xml += "<a:KeyValuePairOfstringanyType>";
+                    xml += "<b:key>" + parameterName + "</b:key>";
+                    if (parameter instanceof Soap.Entity) {
+                        xml += "<b:value i:type=\"a:Entity\">" + parameter.Serialize() + "</b:value>";
                     }
                     else {
-                        XML += Parameter.Serialize();
+                        xml += parameter.Serialize();
                     }
-                    XML += "</a:KeyValuePairOfstringanyType>";
-
+                    xml += "</a:KeyValuePairOfstringanyType>";
                 }
-                XML += "</a:Parameters>";
-                XML += "<a:RequestId i:nil = \"true\" />";
-                XML += "<a:RequestName>" + this.RequestName + "</a:RequestName>";
-                XML += "</" + this.ExecuteRequestType + ">";
-                if (this.IncludeExecuteHeader) { XML += "</Execute>"; }
-                return XML;
+                xml += "</a:Parameters>";
+                xml += "<a:RequestId i:nil = \"true\" />";
+                xml += "<a:RequestName>" + this.requestName + "</a:RequestName>";
+                xml += "</" + this.ExecuteRequestType + ">";
+                if (this.IncludeExecuteHeader) { xml += "</Execute>"; }
+                return xml;
             }
+        }
+        export class ExecuteResponse extends SoapResponse {
+            constructor(responseXML: string) {
+                super(responseXML);
+                this.PropertyTypes["Results"] = "AttributeCollection";
+            }
+            Results: AttributeCollection;
+            ResponseName: string;
         }
         export class CreateRequest extends ExecuteRequest {
 
             /**
              * Constructor.
              *
-             * @param   {Entity}    Target  Entity to be created.
+             * @param   {Entity}    target  Entity to be created.
              */
-
-            constructor(Target: Entity) {
+            constructor(target: Entity) {
                 super("Create", "a:CreateRequest");
-                this.Parameters["Target"] = Target;
+                this.parameters["Target"] = target;
             }
         }
         export class CreateResponse extends ExecuteResponse {
+            constructor(responseXML: string) {
+                super(responseXML);
+                this.PropertyTypes["id"] = "s";
+                this.PropertyTypes["CreateResult"] = "s";
+            }
+            ParseResult(): void {
+                super.ParseResultInernal(this.responseXML);
+                if ((<any>this).CreateResult) {
+                    this.id = (<any>this).CreateResult;
+                }
+            }
             id: string;
         }
         export class UpdateRequest extends ExecuteRequest {
@@ -1659,12 +1788,11 @@ module XrmTSToolkit {
             /**
              * Constructor.
              *
-             * @param   {Entity}    Target  Entity to be updated.
+             * @param   {Entity}    target  Entity to be updated.
              */
-
-            constructor(Target: Entity) {
+            constructor(target: Entity) {
                 super("Update", "a:UpdateRequest");
-                this.Parameters["Target"] = Target;
+                this.parameters["Target"] = target;
             }
         }
         export class UpdateResponse extends ExecuteResponse { }
@@ -1673,91 +1801,101 @@ module XrmTSToolkit {
             /**
              * Constructor.
              *
-             * @param   {EntityReference}   Target  Entity to be deleted.
+             * @param   {EntityReference}   target  Entity to be deleted.
              */
-
-            constructor(Target: EntityReference) {
+            constructor(target: EntityReference) {
                 super("Delete", "a:DeleteRequest");
-                this.Parameters["Target"] = Target;
+                this.parameters["Target"] = target;
             }
         }
         export class DeleteResponse extends ExecuteResponse { }
+        export class RetrieveRequest extends ExecuteRequest {
+
+        }
+        export class RetrieveResponse extends ExecuteResponse {
+
+        }
+
         export class AssociateRequest extends ExecuteRequest {
 
             /**
              * Constructor.
              *
-             * @param   {Soap.EntityReference}  Moniker1    The first entity.
-             * @param   {Soap.EntityReference}  Moniker2    The second entity.
-             * @param   {string}    RelationshipName        LogicalName of the N:N relationship.
+             * @param   {Soap.EntityReference}  moniker1    The first entity.
+             * @param   {Soap.EntityReference}  moniker2    The second entity.
+             * @param   {string}    relationshipName        LogicalName of the N:N relationship.
              */
-
-            constructor(Moniker1: Soap.EntityReference, Moniker2: Soap.EntityReference, RelationshipName: string) {
+            constructor(moniker1: Soap.EntityReference, moniker2: Soap.EntityReference, relationshipName: string) {
                 super("AssociateEntities");
-                this.Parameters["Moniker1"] = Moniker1;
-                this.Parameters["Moniker2"] = Moniker2;
-                this.Parameters["RelationshipName"] = new Soap.StringValue(RelationshipName);
+                this.parameters["Moniker1"] = moniker1;
+                this.parameters["Moniker2"] = moniker2;
+                this.parameters["RelationshipName"] = new Soap.StringValue(relationshipName);
             }
         }
+        export class AssociateResponse extends ExecuteResponse { }
         export class DisassociateRequest extends ExecuteRequest {
 
             /**
              * Constructor.
              *
-             * @param   {Soap.EntityReference}  Moniker1    The first entity.
-             * @param   {Soap.EntityReference}  Moniker2    The second entity.
-             * @param   {string}    RelationshipName        LogicalName of the N:N relationship.
+             * @param   {Soap.EntityReference}  moniker1    The first entity.
+             * @param   {Soap.EntityReference}  moniker2    The second entity.
+             * @param   {string}    relationshipName        LogicalName of the N:N relationship.
              */
-
-            constructor(Moniker1: Soap.EntityReference, Moniker2: Soap.EntityReference, RelationshipName: string) {
+            constructor(moniker1: Soap.EntityReference, moniker2: Soap.EntityReference, relationshipName: string) {
                 super("DisassociateEntities");
-                this.Parameters["Moniker1"] = Moniker1;
-                this.Parameters["Moniker2"] = Moniker2;
-                this.Parameters["RelationshipName"] = new Soap.StringValue(RelationshipName);
+                this.parameters["Moniker1"] = moniker1;
+                this.parameters["Moniker2"] = moniker2;
+                this.parameters["RelationshipName"] = new Soap.StringValue(relationshipName);
             }
         }
+        export class DisassociateResponse extends ExecuteResponse { }
         export class SetStateRequest extends ExecuteRequest {
 
             /**
              * Constructor.
              *
-             * @param   {Soap.EntityReference}  EntityMoniker   The entity.
-             * @param   {number}    State                       The state (statecode).
-             * @param   {number}    Status                      The status (statuscode).
+             * @param   {Soap.EntityReference}  entityMoniker   The entity.
+             * @param   {number}    state                       The state (statecode).
+             * @param   {number}    status                      The status (statuscode).
              */
-
-            constructor(EntityMoniker: Soap.EntityReference, State: number, Status: number);
+            constructor(entityMoniker: Soap.EntityReference, state: number, status: number);
 
             /**
              * Constructor.
              *
-             * @param   {Soap.EntityReference}  EntityMoniker   The entity.
-             * @param   {Soap.OptionSetValue}   State           The state (statecode).
-             * @param   {Soap.OptionSetValue}   Status          The status (statuscode).
+             * @param   {Soap.EntityReference}  entityMoniker   The entity.
+             * @param   {Soap.OptionSetValue}   state           The state (statecode).
+             * @param   {Soap.OptionSetValue}   status          The status (statuscode).
              */
-
-            constructor(EntityMoniker: Soap.EntityReference, State: Soap.OptionSetValue, Status: Soap.OptionSetValue);
-            constructor(EntityMoniker: Soap.EntityReference, State: number| Soap.OptionSetValue, Status: number| Soap.OptionSetValue) {
+            constructor(entityMoniker: Soap.EntityReference, state: Soap.OptionSetValue, Status: Soap.OptionSetValue);
+            constructor(entityMoniker: Soap.EntityReference, state: number | Soap.OptionSetValue, status: number | Soap.OptionSetValue) {
                 super("SetState");
-                var StateOptionSet: Soap.OptionSetValue;
-                if (typeof State === "number") { StateOptionSet = new Soap.OptionSetValue(State); }
-                else { StateOptionSet = State; }
-                var StatusOptionSet: Soap.OptionSetValue;
-                if (typeof Status === "number") { StatusOptionSet = new Soap.OptionSetValue(Status); }
-                else { StatusOptionSet = Status; }
-                this.Parameters = new Soap.AttributeCollection();
-                this.Parameters["EntityMoniker"] = EntityMoniker;
-                this.Parameters["State"] = StateOptionSet;
-                this.Parameters["Status"] = StatusOptionSet;
+                var stateOptionSet: Soap.OptionSetValue;
+                if (typeof state === "number") { stateOptionSet = new Soap.OptionSetValue(state); }
+                else { stateOptionSet = state; }
+                var statusOptionSet: Soap.OptionSetValue;
+                if (typeof status === "number") { statusOptionSet = new Soap.OptionSetValue(status); }
+                else { statusOptionSet = status; }
+                this.parameters = new Soap.ParameterCollection();
+                this.parameters["EntityMoniker"] = entityMoniker;
+                this.parameters["State"] = stateOptionSet;
+                this.parameters["Status"] = statusOptionSet;
             }
         }
+        export class SetStateResponse extends ExecuteResponse { }
         export class WhoAmIRequest extends ExecuteRequest {
             constructor() {
                 super("WhoAmI");
             }
         }
         export class WhoAmIResponse extends ExecuteResponse {
-            constructor(ResponseXML: string) { super(ResponseXML); }
+            constructor(responseXML: string) {
+                super(responseXML);
+                this.PropertyTypes["UserId"] = "s";
+                this.PropertyTypes["BusinessUnitId"] = "s";
+                this.PropertyTypes["OrganizationId"] = "s";
+            }
             public UserId: string;
             public BusinessUnitId: string;
             public OrganizationId: string;
@@ -1767,52 +1905,47 @@ module XrmTSToolkit {
             /**
              * Constructor.
              *
-             * @param   {EntityReference}   Assignee    The entity (user or team) that the record will be assigned to.
-             * @param   {EntityReference}   Target      The record to be assigned.
+             * @param   {EntityReference}   assignee    The entity (user or team) that the record will be assigned to.
+             * @param   {EntityReference}   target      The record to be assigned.
              */
-
-            constructor(Assignee: EntityReference, Target: EntityReference) {
+            constructor(assignee: EntityReference, target: EntityReference) {
                 super("Assign");
-                this.Parameters["Assignee"] = Assignee;
-                this.Parameters["Target"] = Target;
+                this.parameters["Assignee"] = assignee;
+                this.parameters["Target"] = target;
             }
         }
-        export class AssignResponse extends ExecuteResponse {
-            constructor(ResponseXML: string) { super(ResponseXML); }
-        }
+        export class AssignResponse extends ExecuteResponse { }
         type OrganizationRequestCollection = Array<Soap.ExecuteRequest>;
         export class ExecuteMultipleRequest extends ExecuteRequest {
-
             /**
              * Constructor.
              *
-             * @param   {OrganizationRequestCollection} Requests    The requests to be executed.
-             * @param   {ExecuteMultipleSettings}   Settings        Options for controlling the operation.
+             * @param   {OrganizationRequestCollection} requests    The requests to be executed.
+             * @param   {ExecuteMultipleSettings}   settings        Options for controlling the operation.
              */
-
             constructor(public Requests?: OrganizationRequestCollection, public Settings?: ExecuteMultipleSettings) {
                 super("ExecuteMultiple", "a:ExecuteMultipleRequest");
                 if (!Requests || Requests == null) { this.Requests = []; }
                 if (!Settings || Settings == null) { this.Settings = new Soap.ExecuteMultipleSettings(); }
             }
             Serialize(): string {
-                var XML = "<Execute" + Soap.GetNameSpacesXML() + ">";
-                XML += "<request i:type='" + this.RequestType + "'><a:Parameters>";
-                XML += "<a:KeyValuePairOfstringanyType><b:key>Requests</b:key><b:value i:type=\"l:OrganizationRequestCollection\">";
-                $.each(this.Requests, function (i, Request) {
-                    Request.ExecuteRequestType = "l:OrganizationRequest";
-                    Request.IncludeExecuteHeader = false;
-                    XML += Request.Serialize();
+                var xml = "<Execute" + Soap.GetNameSpacesXML() + ">";
+                xml += "<request i:type='" + this.requestType + "'><a:Parameters>";
+                xml += "<a:KeyValuePairOfstringanyType><b:key>Requests</b:key><b:value i:type=\"l:OrganizationRequestCollection\">";
+                $.each(this.Requests, function (i, request) {
+                    request.ExecuteRequestType = "l:OrganizationRequest";
+                    request.IncludeExecuteHeader = false;
+                    xml += request.Serialize();
                 });
-                XML += "</b:value></a:KeyValuePairOfstringanyType>";
-                XML += "<a:KeyValuePairOfstringanyType><b:key>Settings</b:key><b:value i:type=\"l:ExecuteMultipleSettings\">";
-                XML += this.Settings.Serialize();
-                XML += "</b:value></a:KeyValuePairOfstringanyType>";
-                XML += "</a:Parameters>";
-                XML += "<a:RequestId i:nil = \"true\" />";
-                XML += "<a:RequestName>ExecuteMultiple</a:RequestName>";
-                XML += "</request></Execute>";
-                return XML;
+                xml += "</b:value></a:KeyValuePairOfstringanyType>";
+                xml += "<a:KeyValuePairOfstringanyType><b:key>Settings</b:key><b:value i:type=\"l:ExecuteMultipleSettings\">";
+                xml += this.Settings.Serialize();
+                xml += "</b:value></a:KeyValuePairOfstringanyType>";
+                xml += "</a:Parameters>";
+                xml += "<a:RequestId i:nil = \"true\" />";
+                xml += "<a:RequestName>ExecuteMultiple</a:RequestName>";
+                xml += "</request></Execute>";
+                return xml;
             }
         }
         export class ExecuteMultipleSettings {
@@ -1820,42 +1953,49 @@ module XrmTSToolkit {
             /**
              * Constructor.
              *
-             * @param   {boolean}   optional public ContinueOnError true to continue on error otherwise false.
-             * @param   {boolean}   optional public ReturnResponses true to return the individual responses otherwise false.
+             * @param   {boolean}   optional public continueOnError true to continue on error otherwise false.
+             * @param   {boolean}   optional public returnResponses true to return the individual responses otherwise false.
              */
-
             constructor(public ContinueOnError: boolean = false, public ReturnResponses: boolean = false) { }
             Serialize(): string {
-                var XML = "<l:ContinueOnError>" + this.ContinueOnError.toString() + "</l:ContinueOnError>";
-                XML += "<l:ReturnResponses>" + this.ReturnResponses.toString() + "</l:ReturnResponses>";
-                return XML;
+                var xml = "<l:ContinueOnError>" + this.ContinueOnError.toString() + "</l:ContinueOnError>";
+                xml += "<l:ReturnResponses>" + this.ReturnResponses.toString() + "</l:ReturnResponses>";
+                return xml;
             }
         }
         export class ExecuteMultipleResponse extends ExecuteResponse {
+            constructor(responseXML: string) {
+                super(responseXML);
+                this.PropertyTypes["Responses"] = "ExecuteMultipleResponseItem";
+                this.PropertyTypes["ResponseName"] = "s";
+            }
             Responses: ExecuteMultipleResponseItemCollection;
-            ResponseName: string;
         }
         type ExecuteMultipleResponseItemCollection = Array<ExecuteMultipleResponseItem>;
 
         export class ExecuteMultipleResponseItem {
-            Fault: Soap.Fault;
+            PropertyTypes = {
+                Fault: "AttributeCollection",
+                RequestIndex: "n",
+                Response: "SoapResponse"
+            }
+            Fault: Fault;
             RequestIndex: number;
-            Response: Soap.SoapResponse;
+            Response: SoapResponse;
         }
         export class GrantAccessRequest extends ExecuteRequest {
 
             /**
              * Constructor.
              *
-             * @param   {EntityReference}   Target      Record to receive access to.
-             * @param   {EntityReference}   Principal   The user or team to be granted access.
-             * @param   {AccessRights}  AccessMask      The type of access to be granted.
+             * @param   {EntityReference}   target      Record to receive access to.
+             * @param   {EntityReference}   principal   The user or team to be granted access.
+             * @param   {AccessRights}  accessMask      The type of access to be granted.
              */
-
-            constructor(Target: EntityReference, Principal: EntityReference, AccessMask: AccessRights) {
+            constructor(target: EntityReference, principal: EntityReference, accessMask: Soap.AccessRights) {
                 super("GrantAccess");
-                this.Parameters["Target"] = Target;
-                this.Parameters["PrincipalAccess"] = new PrincipalAccess(AccessMask, Principal);
+                this.parameters["Target"] = target;
+                this.parameters["PrincipalAccess"] = new PrincipalAccess(accessMask, principal);
             }
         }
         export class GrantAccessResponse extends ExecuteResponse { }
@@ -1864,15 +2004,14 @@ module XrmTSToolkit {
             /**
              * Constructor.
              *
-             * @param   {EntityReference}   Target      Record for which access will be modified.
-             * @param   {EntityReference}   Principal   The user or team for which the access will be modified.
-             * @param   {AccessRights}  AccessMask      The type of access to be granted.
+             * @param   {EntityReference}   target      Record for which access will be modified.
+             * @param   {EntityReference}   principal   The user or team for which the access will be modified.
+             * @param   {AccessRights}  accessMask      The type of access to be granted.
              */
-
-            constructor(Target: EntityReference, Principal: EntityReference, AccessMask: AccessRights) {
+            constructor(target: EntityReference, principal: EntityReference, accessMask: AccessRights) {
                 super("ModifyAccess");
-                this.Parameters["Target"] = Target;
-                this.Parameters["PrincipalAccess"] = new PrincipalAccess(AccessMask, Principal);
+                this.parameters["Target"] = target;
+                this.parameters["PrincipalAccess"] = new PrincipalAccess(accessMask, principal);
             }
         }
         export class ModifyAccessResponse extends ExecuteResponse { }
@@ -1881,14 +2020,13 @@ module XrmTSToolkit {
             /**
              * Constructor.
              *
-             * @param   {EntityReference}   Target  Record for which access will be removed.
-             * @param   {EntityReference}   The user or team to remove access from.
+             * @param   {EntityReference}   target  Record for which access will be removed.
+             * @param   {EntityReference}   revokee The user or team to remove access from.
              */
-
-            constructor(Target: EntityReference, Revokee: EntityReference) {
+            constructor(target: EntityReference, revokee: EntityReference) {
                 super("RevokeAccess");
-                this.Parameters["Target"] = Target;
-                this.Parameters["Revokee"] = Revokee;
+                this.parameters["Target"] = target;
+                this.parameters["Revokee"] = revokee;
             }
         }
         export class RevokeAccessResponse extends ExecuteResponse { }
@@ -1897,30 +2035,32 @@ module XrmTSToolkit {
             /**
              * Constructor.
              *
-             * @param   {EntityReference}   Target      Record for which the access will be retrieved.
-             * @param   {EntityReference}   Principal   The user or team for which the access will be checked.
+             * @param   {EntityReference}   target      Record for which the access will be retrieved.
+             * @param   {EntityReference}   principal   The user or team for which the access will be checked.
              */
-
-            constructor(Target: EntityReference, Principal: EntityReference) {
+            constructor(target: EntityReference, principal: EntityReference) {
                 super("RetrievePrincipalAccess");
-                this.Parameters["Target"] = Target;
-                this.Parameters["Principal"] = Principal;
+                this.parameters["Target"] = target;
+                this.parameters["Principal"] = principal;
             }
         }
         export class RetrievePrincipleAccessResponse extends ExecuteResponse {
+            constructor(responseXML: string) {
+                super(responseXML);
+                this.PropertyTypes["AccessRights"] = "[n]";
+            }
             AccessRights: Array<AccessRights>;
         }
         export class PrincipalAccess implements Soap.ISerializable {
-            constructor(public AccessMask: AccessRights, public Principal: EntityReference) { }
+            constructor(public accessMask: AccessRights, public principal: EntityReference) { }
             Serialize(): string {
-                var XML = "<b:value i:type=\"g:PrincipalAccess\"><g:AccessMask>" + AccessRights[this.AccessMask].toString() + "</g:AccessMask>";
-                XML += "<g:Principal><a:Id>" + Soap.Entity.EncodeValue(this.Principal.Id) + "</a:Id>";
-                XML += "<a:LogicalName>" + Soap.Entity.EncodeValue(this.Principal.LogicalName) + "</a:LogicalName><a:Name i:nil=\"true\" />";
-                XML += "</g:Principal></b:value>";
-                return XML;
+                var xml = "<b:value i:type=\"g:PrincipalAccess\"><g:AccessMask>" + AccessRights[this.accessMask].toString() + "</g:AccessMask>";
+                xml += "<g:Principal><a:Id>" + Soap.Entity.EncodeValue(this.principal.Id) + "</a:Id>";
+                xml += "<a:LogicalName>" + Soap.Entity.EncodeValue(this.principal.LogicalName) + "</a:LogicalName><a:Name i:nil=\"true\" />";
+                xml += "</g:Principal></b:value>";
+                return xml;
             }
         }
-
         export enum AccessRights {
             None = 0,
             ReadAccess = 1,
@@ -1931,6 +2071,856 @@ module XrmTSToolkit {
             DeleteAccess = 65536,
             ShareAccess = 262144,
             AssignAccess = 524288
+        }
+        export class RetrieveEntityRequest extends ExecuteRequest {
+            constructor(logicalName: string, filters: Array<EntityFilters>, retrieveAsIfPublished: boolean = true) {
+                super("RetrieveEntity", "a:RetrieveEntityRequest");
+                this.parameters["EntityFilters"] = new EntityFilterCollection(filters);
+                this.parameters["MetadataId"] = new GuidValue("00000000-0000-0000-0000-000000000000");
+                this.parameters["RetrieveAsIfPublished"] = new BooleanValue(true);
+                this.parameters["LogicalName"] = new StringValue(logicalName);
+            }
+        }
+        export class RetrieveEntityResponse extends ExecuteResponse {
+            EntityMetadata: EntityMetadata;
+        }
+        export class EntityFilterCollection implements ISerializable {
+            constructor(filters: Array<EntityFilters>) {
+                if (filters) {
+                    this.Filters = filters;
+                }
+            }
+            Filters: Array<EntityFilters> = [];
+            Serialize(): string {
+                var filterNames = new Array<string>();
+                var containsAllValue = $.inArray(EntityFilters.All, this.Filters) >= 0;
+                if (containsAllValue == true) {
+                    this.Filters = new Array<EntityFilters>();
+                    this.Filters.push(EntityFilters.Attributes);
+                    this.Filters.push(EntityFilters.Entity);
+                    this.Filters.push(EntityFilters.Privileges);
+                    this.Filters.push(EntityFilters.Relationships);
+                }
+                $.each(this.Filters, function (i, filter) {
+                    filterNames.push(EntityFilters[filter].toString());
+                });
+                var xml = "<b:value i:type=\"h:EntityFilters\">" + filterNames.join(" ") + "</b:value>";
+                return xml;
+            }
+        }
+        export class HasPropertyTypes {
+            PropertyTypes = new PropertyTypeCollection();
+        }
+        export class BaseMetaData extends HasPropertyTypes {
+            MetadataId: string;
+            HasChanged: boolean;
+        }
+        export class EntityMetadata extends BaseMetaData {
+            constructor() {
+                super();
+                this.PropertyTypes["ActivityTypeMask"] = "n";
+                this.PropertyTypes["Attributes"] = "[AttributeMetadata]";
+                this.PropertyTypes["AutoCreateAccessTeams"] = "b";
+                this.PropertyTypes["AutoRouteToOwnerQueue"] = "b";
+                this.PropertyTypes["CanBeInManyToMany"] = "ManagedProperty";
+                this.PropertyTypes["CanBePrimaryEntityInRelationship"] = "ManagedProperty";
+                this.PropertyTypes["CanBeRelatedEntityInRelationship"] = "aaaaManagedProperty";
+                this.PropertyTypes["CanCreateAttributes"] = "ManagedProperty";
+                this.PropertyTypes["CanCreateCharts"] = "aaaaManagedProperty";
+                this.PropertyTypes["CanCreateForms"] = "ManagedProperty";
+                this.PropertyTypes["CanCreateViews"] = "ManagedProperty";
+                this.PropertyTypes["CanModifyAdditionalSettings"] = "ManagedProperty";
+                this.PropertyTypes["CanTriggerWorkflow"] = "b";
+                this.PropertyTypes["Description"] = "Label";
+                this.PropertyTypes["DisplayCollectionName"] = "Label";
+                this.PropertyTypes["DisplayName"] = "aaaaLabel";
+                this.PropertyTypes["EnforceStateTransitions"] = "b";
+                this.PropertyTypes["IconLargeName"] = "s";
+                this.PropertyTypes["IconMediumName"] = "s";
+                this.PropertyTypes["IconSmallName"] = "s";
+                this.PropertyTypes["IsAIRUpdated"] = "b";
+                this.PropertyTypes["IsActivity"] = "b";
+                this.PropertyTypes["IsActivityParty"] = "b";
+                this.PropertyTypes["IsAuditEnabled"] = "ManagedProperty";
+                this.PropertyTypes["IsAvailableOffline"] = "b";
+                this.PropertyTypes["IsBusinessProcessEnabled"] = "b";
+                this.PropertyTypes["IsChildEntity"] = "b";
+                this.PropertyTypes["IsConnectionsEnabled"] = "ManagedProperty";
+                this.PropertyTypes["IsCustomEntity"] = "b";
+                this.PropertyTypes["IsCustomizable"] = "ManagedProperty";
+                this.PropertyTypes["IsDocumentManagementEnabled"] = "b";
+                this.PropertyTypes["IsDuplicateDetectionEnabled"] = "ManagedProperty";
+                this.PropertyTypes["IsEnabledForCharts"] = "b";
+                this.PropertyTypes["IsEnabledForTrace"] = "aaaa";
+                this.PropertyTypes["IsImportable"] = "aaaa";
+                this.PropertyTypes["IsIntersect"] = "aaaa";
+                this.PropertyTypes["IsMailMergeEnabled"] = "ManagedProperty";
+                this.PropertyTypes["IsManaged"] = "b";
+                this.PropertyTypes["IsMappable"] = "ManagedProperty";
+                this.PropertyTypes["IsQuickCreateEnabled"] = "b";
+                this.PropertyTypes["IsReadOnlyInMobileClient"] = "ManagedProperty";
+                this.PropertyTypes["IsReadingPaneEnabled"] = "b";
+                this.PropertyTypes["IsRenameable"] = "ManagedProperty";
+                this.PropertyTypes["IsStateModelAware"] = "b";
+                this.PropertyTypes["IsValidForAdvancedFind"] = "b";
+                this.PropertyTypes["IsValidForQueue"] = "ManagedProperty";
+                this.PropertyTypes["IsVisibleInMobile"] = "ManagedProperty";
+                this.PropertyTypes["IsVisibleInMobileClient"] = "ManagedProperty";
+                this.PropertyTypes["LogicalName"] = "s";
+                this.PropertyTypes["ManyToManyRelationships"] = "[ManyToManyRelationshipMetadata]";
+                this.PropertyTypes["ManyToOneRelationships"] = "[OneToManyRelationshipMetadata]";
+                this.PropertyTypes["OwnershipType"] = "n";
+                this.PropertyTypes["PrimaryIdAttribute"] = "s";
+                this.PropertyTypes["PrimaryNameAttribute"] = "s";
+                this.PropertyTypes["Privileges"] = "[n]";
+                this.PropertyTypes["RecurrenceBaseEntityLogicalName"] = "s";
+                this.PropertyTypes["ReportViewName"] = "s";
+                this.PropertyTypes["SchemaName"] = "s";
+                this.PropertyTypes["IntroducedVersion"] = "s";
+                this.PropertyTypes["PrimaryImageAttribute"] = "s";
+                this.PropertyTypes["CanChangeHierarchicalRelationship"] = "ManagedProperty";
+                this.PropertyTypes["EntityHelpUrl"] = "s";
+                this.PropertyTypes["EntityHelpUrlEnabled"] = "b";
+            }
+            ActivityTypeMask: number = null;
+            Attributes: Array<AttributeMetadata> = [];
+            AutoCreateAccessTeams: boolean;
+            AutoRouteToOwnerQueue: boolean;
+            CanBeInManyToMany: ManagedProperty;
+            CanBePrimaryEntityInRelationship: ManagedProperty;
+            CanBeRelatedEntityInRelationship: ManagedProperty;
+            CanCreateAttributes: ManagedProperty;
+            CanCreateCharts: ManagedProperty;
+            CanCreateForms: ManagedProperty;
+            CanCreateViews: ManagedProperty;
+            CanModifyAdditionalSettings: ManagedProperty;
+            CanTriggerWorkflow: boolean;
+            Description: Label;
+            DisplayCollectionName: Label;
+            DisplayName: Label;
+            EnforceStateTransitions: boolean;
+            IconLargeName: string;
+            IconMediumName: string;
+            IconSmallName: string;
+            IsAIRUpdated: boolean;
+            IsActivity: boolean;
+            IsActivityParty: boolean;
+            IsAuditEnabled: ManagedProperty;
+            IsAvailableOffline: boolean;
+            IsBusinessProcessEnabled: boolean;
+            IsChildEntity: boolean;
+            IsConnectionsEnabled: ManagedProperty;
+            IsCustomEntity: boolean;
+            IsCustomizable: ManagedProperty;
+            IsDocumentManagementEnabled: boolean;
+            IsDuplicateDetectionEnabled: ManagedProperty;
+            IsEnabledForCharts: boolean;
+            IsEnabledForTrace: boolean;
+            IsImportable: boolean;
+            IsIntersect: boolean;
+            IsMailMergeEnabled: ManagedProperty;
+            IsManaged: boolean;
+            IsMappable: ManagedProperty;
+            IsQuickCreateEnabled: boolean;
+            IsReadOnlyInMobileClient: ManagedProperty;
+            IsReadingPaneEnabled: boolean;
+            IsRenameable: ManagedProperty;
+            IsStateModelAware: boolean;
+            IsValidForAdvancedFind: boolean;
+            IsValidForQueue: ManagedProperty;
+            IsVisibleInMobile: ManagedProperty;
+            IsVisibleInMobileClient: ManagedProperty;
+            LogicalName: string;
+            ManyToManyRelationships: Array<ManyToManyRelationshipMetadata> = [];
+            ManyToOneRelationships: Array<OneToManyRelationshipMetadata> = [];
+            ObjectTypeCode: number;
+            OneToManyRelationships: Array<OneToManyRelationshipMetadata> = [];
+            OwnershipType: OwnershipTypes;
+            PrimaryIdAttribute: string;
+            PrimaryNameAttribute: string;
+            Privileges: Array<SecurityPrivilegeMetadata>;
+            RecurrenceBaseEntityLogicalName: string;
+            ReportViewName: string;
+            SchemaName: string;
+            IntroducedVersion: string;
+            PrimaryImageAttribute: string;
+            CanChangeHierarchicalRelationship: ManagedProperty;
+            EntityHelpUrl: string;
+            EntityHelpUrlEnabled: boolean;
+        }
+        export class AttributeMetadata extends BaseMetaData {
+            constructor() {
+                super();
+                this.PropertyTypes["AttributeOf"] = "s";
+                this.PropertyTypes["AttributeType"] = "n";
+                this.PropertyTypes["CanBeSecuredForCreate"] = "b";
+                this.PropertyTypes["CanBeSecuredForRead"] = "b";
+                this.PropertyTypes["CanBeSecuredForUpdate"] = "b";
+                this.PropertyTypes["CanModifyAdditionalSettings"] = "ManagedProperty";
+                this.PropertyTypes["ColumnNumber"] = "n";
+                this.PropertyTypes["DeprecatedVersion"] = "s";
+                this.PropertyTypes["Description"] = "Label";
+                this.PropertyTypes["DisplayName"] = "Label";
+                this.PropertyTypes["EntityLogicalName"] = "s";
+                this.PropertyTypes["IsAuditEnabled"] = "ManagedProperty";
+                this.PropertyTypes["IsCustomAttribute"] = "b";
+                this.PropertyTypes["IsCustomizable"] = "ManagedProperty";
+                this.PropertyTypes["IsManaged"] = "b";
+                this.PropertyTypes["IsPrimaryId"] = "b";
+                this.PropertyTypes["IsPrimaryName"] = "b";
+                this.PropertyTypes["IsRenameable"] = "ManagedProperty";
+                this.PropertyTypes["IsSecured"] = "b";
+                this.PropertyTypes["IsValidForAdvancedFind"] = "ManagedProperty";
+                this.PropertyTypes["IsValidForCreate"] = "b";
+                this.PropertyTypes["IsValidForRead"] = "b";
+                this.PropertyTypes["IsValidForUpdate"] = "b";
+                this.PropertyTypes["LinkedAttributeId"] = "s";
+                this.PropertyTypes["LogicalName"] = "s";
+                this.PropertyTypes["RequiredLevel"] = "ManagedProperty";
+                this.PropertyTypes["SchemaName"] = "s";
+                this.PropertyTypes["AttributeTypeName"] = "s";
+                this.PropertyTypes["IntroducedVersion"] = "s";
+                this.PropertyTypes["IsLogical"] = "b";
+                this.PropertyTypes["SourceType"] = "n";
+            }
+            AttributeOf: string;
+            AttributeType: AttributeTypeCode;
+            CanBeSecuredForCreate: boolean;
+            CanBeSecuredForRead: boolean;
+            CanBeSecuredForUpdate: boolean;
+            CanModifyAdditionalSettings: ManagedProperty;
+            ColumnNumber: number;
+            DeprecatedVersion: string;
+            Description: Label;
+            DisplayName: Label;
+            EntityLogicalName: string;
+            IsAuditEnabled: ManagedProperty;
+            IsCustomAttribute: boolean;
+            IsCustomizable: ManagedProperty;
+            IsManaged: boolean;
+            IsPrimaryId: boolean;
+            IsPrimaryName: boolean;
+            IsRenameable: ManagedProperty;
+            IsSecured: boolean;
+            IsValidForAdvancedFind: ManagedProperty;
+            IsValidForCreate: boolean;
+            IsValidForRead: boolean;
+            IsValidForUpdate: boolean;
+            LinkedAttributeId: string;
+            LogicalName: string;
+            RequiredLevel: ManagedProperty;
+            SchemaName: string;
+            AttributeTypeName: string;
+            IntroducedVersion: string;
+            IsLogical: boolean;
+            SourceType: number;
+        }
+        export class BooleanAttributeMetadata extends AttributeMetadata {
+            DefaultValue: boolean;
+            OptionSet: OptionSetMetadata;
+            FormulaDefinition: string;
+            SourceTypeMask: number;
+        }
+        export class DateTimeAttributeMetadata extends AttributeMetadata {
+            Format: DateTimeFormat;
+            ImeMode: ImeMode;
+            FormulaDefinition: string;
+            SourceTypeMask: number;
+        }
+        export class DecimalAttributeMetadata extends AttributeMetadata {
+            ImeMode: ImeMode;
+            MaxValue: number;
+            MinValue: number;
+            Precision: number;
+            FormulaDefinition: string;
+            SourceTypeMask: number;
+        }
+        export class DoubleAttributeMetadata extends AttributeMetadata {
+            ImeMode: ImeMode;
+            MaxValue: number;
+            MinValue: number;
+            Precision: number;
+        }
+        export class ImageAttributeMetadata extends AttributeMetadata {
+            IsPrimaryImage: boolean;
+            MaxHeight: number;
+            MaxWidth: number;
+        }
+        export class IntegerAttributeMetadata extends AttributeMetadata {
+            Format: IntegerFormat;
+            MaxValue: number;
+            MinValue: number;
+            FormulaDefinition: string;
+            SourceTypeMask: number;
+        }
+        export class LookupAttributeMetadata extends AttributeMetadata {
+            Targets: Array<string> = [];
+        }
+        export class MemoAttributeMetadata extends AttributeMetadata {
+            Format: StringFormat;
+            ImeMode: ImeMode;
+            MaxLength: number;
+            IsLocalizable: boolean;
+        }
+        export class MoneyAttributeMetadata extends AttributeMetadata {
+            CalculationOf: string;
+            ImeMode: ImeMode;
+            MaxValue: number;
+            MinValue: number;
+            Precision: number;
+            PrecisionSource: number;
+            FormulaDefinition: string;
+            IsBaseCurrency: boolean;
+            SourceTypeMask: number;
+        }
+        export class PicklistAttributeMetadata extends AttributeMetadata {
+            DefaultFormValue: number;
+            OptionSet: OptionSetMetadata;
+        }
+        export class StringAttributeMetadata extends AttributeMetadata {
+            Format: StringFormat;
+            ImeMode: ImeMode;
+            MaxLength: number;
+            YomiOf: string;
+            FormatName: StringFormatName;
+            FormulaDefinition: string;
+            IsLocalizable: boolean;
+            SourceTypeMask: number;
+        }
+        export class RelationshipMetadataBase extends BaseMetaData {
+            IsCustomRelationship: boolean;
+            IsCustomizable: ManagedProperty;
+            IsManaged: boolean;
+            IsValidForAdvancedFind: boolean;
+            SchemaName: string;
+            SecurityTypes: SecurityTypes;
+            IntroducedVersion: string;
+            RelationshipType: RelationshipType;
+        }
+        export class ManyToManyRelationshipMetadata extends RelationshipMetadataBase {
+            Entity1AssociatedMenuConfiguration: AssociatedMenuConfiguration;
+            Entity1IntersectAttribute: string;
+            Entity1LogicalName: string;
+            Entity2AssociatedMenuConfiguration: AssociatedMenuConfiguration;
+            Entity2IntersectAttribute: string;
+            Entity2LogicalName: string;
+            IntersectEntityName: string;
+        }
+        export class OneToManyRelationshipMetadata extends RelationshipMetadataBase {
+            constructor() {
+                super();
+                this.PropertyTypes["AssociatedMenuConfiguration"] = "AssociatedMenuConfiguration";
+                this.PropertyTypes["CascadeConfiguration"] = "CascadeConfiguration";
+            }
+            AssociatedMenuConfiguration: AssociatedMenuConfiguration;
+            CascadeConfiguration: CascadeConfiguration;
+            IsHierarchical: boolean;
+            ReferencedAttribute: string;
+            ReferencedEntity: string;
+            ReferencingAttribute: string;
+            ReferencingEntity: string;
+        }
+        export class OptionSetMetadata extends BaseMetaData {
+            Description: Label;
+            DisplayName: Label;
+            IsCustomOptionSet: boolean;
+            IsCustomizable: ManagedProperty;
+            IsGlobal: boolean;
+            IsManaged: boolean;
+            Name: string;
+            OptionSetType: OptionSetType;
+            IntroducedVersion: string;
+            Options: Array<OptionMetadata> = [];
+            FormulaDefinition: string;
+            SourceTypeMask: number;
+        }
+        export class OptionMetadata extends BaseMetaData {
+            Description: Label;
+            IsManaged: boolean;
+            Label: Label;
+            Value: number;
+        }
+        export class AssociatedMenuConfiguration {
+            Behavior: AssociatedMenuBehavior;
+            Group: AssociatedMenuGroup;
+            Label: Label;
+            Order: number;
+        }
+        export class CascadeConfiguration extends HasPropertyTypes {
+            constructor() {
+                super();
+                this.PropertyTypes["Assign"] = "n";
+                this.PropertyTypes["Delete"] = "n";
+                this.PropertyTypes["Merge"] = "n";
+                this.PropertyTypes["Reparent"] = "n";
+                this.PropertyTypes["Share"] = "n";
+                this.PropertyTypes["Unshare"] = "n";
+            }
+            PropertyTypes: PropertyTypeCollection;
+            Assign: CascadeType;
+            Delete: CascadeType;
+            Merge: CascadeType;
+            Reparent: CascadeType;
+            Share: CascadeType;
+            Unshare: CascadeType;
+        }
+        export class SecurityPrivilegeMetadata {
+            CanBeBasic: boolean;
+            CanBeDeep: boolean;
+            CanBeGlobal: boolean;
+            CanBeLocal: boolean;
+            Name: string;
+            PrivilegeId: string;
+            PrivilegeType: PrivilegeType;
+        }
+        export class Label extends HasPropertyTypes {
+            constructor() {
+                super();
+                this.PropertyTypes["LocalizedLabels"] = "Array";
+                this.PropertyTypes["UserLocalizedLabel"] = "LocalizedLabel";
+            }
+            LocalizedLabels: Array<LocalizedLabel>;
+            UserLocalizedLabel: LocalizedLabel;
+        }
+        export class StringFormatName {
+            Value: string;
+        }
+        export class LocalizedLabel {
+            MetadataId: string;
+            HasChanged: boolean;
+            IsManaged: boolean;
+            Label: string;
+            LanguageCode: number;
+        }
+        export class ManagedProperty {
+            constructor(public CanBeChanged: boolean, public ManagedPropertyLogicalName: boolean, public Value: boolean) { }
+        }
+
+        export enum AssociatedMenuBehavior {
+            // Summary:
+            //     Use the collection name for the associated menu. Value = 0.
+          
+            UseCollectionName = 0,
+            //
+            // Summary:
+            //     Use the label for the associated menu. Value = 1.
+          
+            UseLabel = 1,
+            //
+            // Summary:
+            //     Do not show the associated menu. Value = 2.
+            
+            DoNotDisplay = 2
+        }
+        export enum AssociatedMenuGroup {
+            // Summary:
+            //     Show the associated menu in the details group. Value = 0.
+            
+            Details = 0,
+            //
+            // Summary:
+            //     Show the associated menu in the sales group. Value = 1.
+           
+            Sales = 1,
+            //
+            // Summary:
+            //     Show the associated menu in the service group. Value = 2.
+            
+            Service = 2,
+            //
+            // Summary:
+            //     Show the associated menu in the marketing group. Value = 3.
+           
+            Marketing = 3
+        }
+        export enum AttributeTypeCode {
+            // Summary:
+            //     A Boolean attribute. Value = 0.
+            
+            Boolean = 0,
+            //
+            // Summary:
+            //     An attribute that represents a customer. Value = 1.
+           
+            Customer = 1,
+            //
+            // Summary:
+            //     A date/time attribute. Value = 2.
+           
+            DateTime = 2,
+            //
+            // Summary:
+            //     A decimal attribute. Value = 3.
+           
+            Decimal = 3,
+            //
+            // Summary:
+            //     A double attribute. Value = 4.
+           
+            Double = 4,
+            //
+            // Summary:
+            //     An integer attribute. Value = 5.
+          
+            Integer = 5,
+            //
+            // Summary:
+            //     A lookup attribute. Value = 6.
+           
+            Lookup = 6,
+            //
+            // Summary:
+            //     A memo attribute. Value = 7.
+           
+            Memo = 7,
+            //
+            // Summary:
+            //     A money attribute. Value = 8.
+            
+            Money = 8,
+            //
+            // Summary:
+            //     An owner attribute. Value = 9.
+           
+            Owner = 9,
+            //
+            // Summary:
+            //     A partylist attribute. Value = 10.
+            
+            PartyList = 10,
+            //
+            // Summary:
+            //     A picklist attribute. Value = 11.
+            
+            Picklist = 11,
+            //
+            // Summary:
+            //     A state attribute. Value = 12.
+           
+            State = 12,
+            //
+            // Summary:
+            //     A status attribute. Value = 13.
+           
+            Status = 13,
+            //
+            // Summary:
+            //     A string attribute. Value = 14.
+           
+            String = 14,
+            //
+            // Summary:
+            //     An attribute that is an ID. Value = 15.
+           
+            Uniqueidentifier = 15,
+            //
+            // Summary:
+            //     An attribute that contains calendar rules. Value = 0x10.
+            
+            CalendarRules = 16,
+            //
+            // Summary:
+            //     An attribute that is created by the system at run time. Value = 0x11.
+           
+            Virtual = 17,
+            //
+            // Summary:
+            //     A big integer attribute. Value = 0x12.
+           
+            BigInt = 18,
+            //
+            // Summary:
+            //     A managed property attribute. Value = 0x13.
+           
+            ManagedProperty = 19,
+            //
+            // Summary:
+            //     An entity name attribute. Value = 20.
+           
+            EntityName = 20
+        }
+        export enum CascadeType {
+            NoCascade,
+            RemoveLink
+        }
+        export enum DateTimeFormat {
+            // Summary:
+            //     Display the date only. Value = 0.
+           
+            DateOnly = 0,
+            //
+            // Summary:
+            //     Display the date and time. Value = 1.
+            DateAndTime = 1,
+        }
+        export enum EntityFilters {
+            // Summary:
+            //     Use this to retrieve only entity information. Equivalent to EntityFilters.Entity.
+            //     Value = 1.
+            Default = 1,
+            //
+            // Summary:
+            //     Use this to retrieve only entity information. Equivalent to EntityFilters.Default.
+            //     Value = 1.
+       
+            Entity = 1,
+            //
+            // Summary:
+            //     Use this to retrieve entity information plus attributes for the entity. Value
+            //     = 2.
+       
+            Attributes = 2,
+            //
+            // Summary:
+            //     Use this to retrieve entity information plus privileges for the entity. Value
+            //     = 4.
+        
+            Privileges = 4,
+            //
+            // Summary:
+            //     Use this to retrieve entity information plus entity relationships for the
+            //     entity. Value = 8.
+       
+            Relationships = 8,
+            //
+            // Summary:
+            //     Use this to retrieve all data for an entity. Value = 15.
+            All = 15
+        }
+        export enum ImeMode {
+            // Summary:
+            //     Specifies that the IME mode is chosen automatically. Value =0.
+           
+            Auto = 0,
+            //
+            // Summary:
+            //     Specifies that the IME mode is inactive. Value = 1.
+            
+            Inactive = 1,
+            //
+            // Summary:
+            //     Specifies that the IME mode is active. Value = 2.
+            
+            Active = 2,
+            //
+            // Summary:
+            //     Specifies that the IME mode is disabled. Value = 3.
+            
+            Disabled = 3
+        }
+        export enum IntegerFormat {
+            // Summary:
+            //     Specifies to display an edit field for an integer. Value = 0.
+        
+            None = 0,
+            //
+            // Summary:
+            //     Specifies to display the integer as a drop down list of durations. Value
+            //     = 1.
+          
+            Duration = 1,
+            //
+            // Summary:
+            //     Specifies to display the integer as a drop down list of time zones. Value
+            //     = 2.
+            
+            TimeZone = 2,
+            //
+            // Summary:
+            //     Specifies the display the integer as a drop down list of installed languages.
+            //     Value = 3.
+           
+            Language = 3,
+            //
+            // Summary:
+            //     Specifies a locale. Value = 4.
+           
+            Locale = 4,
+        }
+        export enum OwnershipTypes {
+            // Summary:
+            //     The entity does not have an owner. internal Value = 0.
+            None = 0,
+            //
+            // Summary:
+            //     The entity is owned by a system user. Value = 1.
+           
+            UserOwned = 1,
+            //
+            // Summary:
+            //     The entity is owned by a team. internalValue = 2.
+          
+            TeamOwned = 2,
+            //
+            // Summary:
+            //     The entity is owned by a business unit. internal Value = 4.
+           
+            BusinessOwned = 4,
+            //
+            // Summary:
+            //     The entity is owned by an organization. Value = 8.
+           
+            OrganizationOwned = 8,
+            //
+            // Summary:
+            //     The entity is parented by a business unit. internal Value = 16.
+           
+            BusinessParented = 16
+        }
+        export enum OptionSetType {
+            // Summary:
+            //     The option set provides a list of options. Value = 0.
+           
+            Picklist = 0,
+            //
+            // Summary:
+            //     The option set represents state options for a Microsoft.Xrm.Sdk.Metadata.StateAttributeMetadata
+            //     attribute. Value = 1.
+           
+            State = 1,
+            //
+            // Summary:
+            //     The option set represents status options for a Microsoft.Xrm.Sdk.Metadata.StatusAttributeMetadata
+            //     attribute. Value = 2.
+            
+            Status = 2,
+            //
+            // Summary:
+            //     The option set provides two options for a Microsoft.Xrm.Sdk.Metadata.BooleanAttributeMetadata
+            //     attribute. Value = 3.
+           
+            Boolean = 3,
+        }
+        export enum PrivilegeType {
+            // Summary:
+            //     Specifies no privilege. Value = 0.
+        
+            None = 0,
+            //
+            // Summary:
+            //     The create privilege. Value = 1.
+           
+            Create = 1,
+            //
+            // Summary:
+            //     The read privilege. Value = 2.
+          
+            Read = 2,
+            //
+            // Summary:
+            //     The write privilege. Value = 3.
+           
+            Write = 3,
+            //
+            // Summary:
+            //     The delete privilege. Value = 4.
+           
+            Delete = 4,
+            //
+            // Summary:
+            //     The assign privilege. Value = 5.
+           
+            Assign = 5,
+            //
+            // Summary:
+            //     The share privilege. Value = 6.
+           
+            Share = 6,
+            //
+            // Summary:
+            //     The append privilege. Value = 7.
+           
+            Append = 7,
+            //
+            // Summary:
+            //     The append to privilege. Value = 8.
+           
+            AppendTo = 8
+        }
+        export enum RelationshipType {
+            // Summary:
+            //     The entity relationship is a One-to-Many relationship. Value = 0.
+            OneToManyRelationship = 0,
+            //
+            // Summary:
+            //     The default value. Equivalent to OneToManyRelationship. Value = 0.
+            Default = 0,
+            //
+            // Summary:
+            //     The entity relationship is a Many-to-Many relationship. Value = 1.
+            ManyToManyRelationship = 1
+        }
+        export enum SecurityTypes {
+            // Summary:
+            //     No security privileges are checked during create or update operations. Value
+            //     = 0.
+           
+            None = 0,
+            //
+            // Summary:
+            //     The Microsoft.Xrm.Sdk.Metadata.PrivilegeType.Append and Microsoft.Xrm.Sdk.Metadata.PrivilegeType.AppendTo
+            //     privileges are checked for create or update operations. Value = 1.
+           
+            Append = 1,
+            //
+            // Summary:
+            //     Security for the referencing entity record is derived from the referenced
+            //     entity record. Value = 2.
+           
+            ParentChild = 2,
+            //
+            // Summary:
+            //     Security for the referencing entity record is derived from a pointer record.
+            //     Value = 4.
+           
+            Pointer = 4,
+            //
+            // Summary:
+            //     The referencing entity record inherits security from the referenced security
+            //     record. Value = 8.
+           
+            Inheritance = 8
+        }
+        export enum StringFormat {
+            // Summary:
+            //     Specifies to display the string as an e-mail. Value = 0.
+           
+            Email = 0,
+            //
+            // Summary:
+            //     Specifies to display the string as text. Value = 1.
+          
+            Text = 1,
+            //
+            // Summary:
+            //     Specifies to display the string as a text area. Value = 2.
+           
+            TextArea = 2,
+            //
+            // Summary:
+            //     Specifies to display the string as a URL. Value = 3.
+           
+            Url = 3,
+            //
+            // Summary:
+            //     Specifies to display the string as a ticker symbol. Value = 4.
+           
+            TickerSymbol = 4,
+            //
+            // Summary:
+            //     Specifies to display the string as a phonetic guide. Value = 5.
+            
+            PhoneticGuide = 5,
+            //
+            // Summary:
+            //     Specifies to display the string as a version number. Value = 6.
+           
+            VersionNumber = 6,
+            //
+            // Summary:
+            //     internal
+            
+            Phone = 7
         }
     }
 }

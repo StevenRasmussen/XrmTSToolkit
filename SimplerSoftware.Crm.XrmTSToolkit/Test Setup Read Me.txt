@@ -1,0 +1,15 @@
+﻿******* Running the main XrmTSToolkit tests
+
+In order to setup the tests, you will need to add the 'XrmTSToolkitTests.js' (output from XrmTSToolkitTests.ts) as a web resource in CRM. 
+The path should be of the form: new_/Tests/XrmTSToolkitTests.js
+
+You will also need to add 'XrmTSToolkit.js' (output from XrmTSToolkit.ts) as a web resource in the form of: new_/Scripts/typings/Xrm/XrmTSToolkit.js
+
+Then just add a button to any form and have the button call the following method on the 'XrmTSToolkitTests.js' webresource:  OpenXrmTSToolkitTestPage
+
+That's it!  Pressing the button should open up a dialog that runs all the tests in sequence.
+
+
+******* Running the 'AccountFormScripts' test
+If you want to also run the 'AccountFormScripts' then you would need to add that as a webresource and then attach the 'accountFormScripts.OnFormLoad' method to the 'OnLoad' of the account form. 
+You also need to create a new field of type 'Lookup' that references the account entity.  The logical name of the relationship should be 'new_parentaccountcopied'.  You will also need to add this field to the form.

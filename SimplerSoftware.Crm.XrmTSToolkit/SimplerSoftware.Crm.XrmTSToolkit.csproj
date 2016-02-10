@@ -24,7 +24,8 @@
     <SccLocalPath>SAK</SccLocalPath>
     <SccAuxPath>SAK</SccAuxPath>
     <SccProvider>SAK</SccProvider>
-    <TypeScriptToolsVersion>1.4</TypeScriptToolsVersion>
+    <TypeScriptToolsVersion>1.7</TypeScriptToolsVersion>
+    <UseGlobalApplicationHostFile />
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -64,6 +65,10 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="packages.config" />
+    <None Include="Scripts\jquery-2.2.0.intellisense.js" />
+    <Content Include="Scripts\jquery-2.2.0.js" />
+    <Content Include="Scripts\jquery-2.2.0.min.js" />
+    <Content Include="Scripts\jquery-2.2.0.min.map" />
     <None Include="Web.Debug.config">
       <DependentUpon>Web.config</DependentUpon>
     </None>
@@ -72,6 +77,7 @@
     </None>
   </ItemGroup>
   <ItemGroup>
+    <Content Include="Test Setup Read Me.txt" />
     <Content Include="Tests\XrmTSToolkitTests.html" />
     <Content Include="Web.config" />
   </ItemGroup>
@@ -82,15 +88,10 @@
     <TypeScriptCompile Include="Scripts\typings\jquery\jquery.d.ts" />
     <TypeScriptCompile Include="Scripts\typings\Xrm\Xrm.d.ts" />
     <TypeScriptCompile Include="Scripts\typings\Xrm\XrmTSToolkit.ts" />
+    <TypeScriptCompile Include="Tests\AccountFormScripts.ts" />
     <TypeScriptCompile Include="Tests\XrmTSToolkitTests.ts" />
   </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Charts\" />
-    <Folder Include="Images\" />
-    <Folder Include="Javascript\" />
-    <Folder Include="Styles\" />
-    <Folder Include="Web Files\" />
-  </ItemGroup>
+  <ItemGroup />
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
     <VSToolsPath Condition="'$(VSToolsPath)' == ''">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)</VSToolsPath>
