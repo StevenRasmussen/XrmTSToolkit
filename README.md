@@ -78,11 +78,9 @@ fromActivityParties.Items.push(fromActivityParty);
 email.Attributes["from"] = new XrmTSToolkit.Soap.EntityCollectionAttribute(fromActivityParties);
 
 var toActivityParties = new XrmTSToolkit.Soap.EntityCollection();
-$.each(data.RetrieveMultipleResult.Entities, function (index, recipient: XrmTSToolkit.Soap.Entity) {
-	var toActivityParty = new XrmTSToolkit.Soap.Entity("activityparty");
-	toActivityParty.Attributes["partyid"] = new XrmTSToolkit.Soap.EntityReference(recipient.Id, recipient.LogicalName);
-	toActivityParties.Items.push(toActivityParty);
-});
+var toActivityParty = new XrmTSToolkit.Soap.Entity("activityparty");
+toActivityParty.Attributes["partyid"] = new XrmTSToolkit.Soap.EntityReference("9C8AF527-2D96-4ADB-9C0B-A21BF460CDDA", "contact");
+toActivityParties.Items.push(toActivityParty);
 email.Attributes["to"] = new XrmTSToolkit.Soap.EntityCollectionAttribute(toActivityParties);
 
 XrmTSToolkit.Soap.Create(email).done(function (emailResponse: XrmTSToolkit.Soap.CreateSoapResponse) {
