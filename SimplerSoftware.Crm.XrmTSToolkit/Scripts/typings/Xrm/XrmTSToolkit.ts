@@ -2,9 +2,9 @@
 /// <reference path="xrm.d.ts" />
 
 /**
-* MSCRM 2011, 2013, 2015 Service Toolkit for TypeScript
+* MSCRM 2011, 2013, 2015, 2016 Service Toolkit for TypeScript
 * @author Steven Rasmussen
-* @current version : 0.8.0
+* @current version : 0.8.1
 * Credits:
 *   The idea of this library was inspired by David Berry and Jaime Ji's XrmServiceToolkit.js
 *    
