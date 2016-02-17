@@ -21,7 +21,7 @@ function RunTests(): void {
         $("#testresults").empty();
 
         var Tests = new Array<any>();
-        Tests.push(CreateEntityTest1);
+        Tests.push(CreateAccount);
         Tests.push(UpdateEntityTest1);
         Tests.push(RetrieveEntityTest);
         Tests.push(AssociateTest);
@@ -41,7 +41,9 @@ function RunTests(): void {
         Tests.push(RevokeAccessTest);
         Tests.push(DeleteTest1);
         Tests.push(ExecuteTest);
+        Tests.push(CreateContact);
         Tests.push(WhoAmITest);
+        Tests.push(CreateEmailTest);
         Tests.push(FaultTest1);
         Tests.push(FaultTest2);
         Tests.push(CreateEntityTest2);
@@ -112,7 +114,7 @@ function MainTestFunction(): JQueryPromise<TestResult> {
     }).promise();
 }
 
-function CreateEntityTest1(): JQueryPromise<TestResult> {
+function CreateAccount(): JQueryPromise<TestResult> {
     var Entity = new XrmTSToolkit.Soap.Entity("account");
     Entity.Attributes["creditonhold"] = new XrmTSToolkit.Soap.BooleanValue(true);
     Entity.Attributes["donotemail"] = true; //Test using just a boolean instead of just the 'BooleanValue'
@@ -132,11 +134,30 @@ function CreateEntityTest1(): JQueryPromise<TestResult> {
         Promise.done(function (data: XrmTSToolkit.Soap.CreateSoapResponse, result, xhr) {
             if (!data.CreateResult) { dfd.reject(new TestResult(false, "Create test failed")); }
             else {
-                dfd.resolve(new TestResult(true, "Create1 test succeeded", data.CreateResult));
+                dfd.resolve(new TestResult(true, "CreateAccount test succeeded", data.CreateResult));
             }
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
-            dfd.reject(new TestResult(false, "Create1 test failed: " + result.faultstring, result));
+            dfd.reject(new TestResult(false, "CreateAccount test failed: " + result.faultstring, result));
+        });
+    }).promise();
+}
+
+function CreateContact(PriorTestResult: TestResult): JQueryPromise<TestResult> {
+    var Entity = new XrmTSToolkit.Soap.Entity("contact");
+    Entity.Attributes["firstname"] = "John";
+    Entity.Attributes["lastname"] = "Doe";
+
+    return $.Deferred<TestResult>(function (dfd) {
+        var Promise = XrmTSToolkit.Soap.Create(Entity);
+        Promise.done(function (data: XrmTSToolkit.Soap.CreateSoapResponse, result, xhr) {
+            if (!data.CreateResult) { dfd.reject(new TestResult(false, "Create test failed")); }
+            else {
+                dfd.resolve(new TestResult(true, "CreateContact test succeeded", PriorTestResult.ResultValue));
+            }
+        });
+        Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+            dfd.reject(new TestResult(false, "CreateContact test failed: " + result.faultstring, result));
         });
     }).promise();
 }
@@ -179,6 +200,8 @@ function RetrieveEntityTest(PriorTestResult: TestResult): JQueryPromise<TestResu
                 var OwnerName = (<XrmTSToolkit.Soap.EntityReference>Entity.Attributes["ownerid"]).Name;
                 var FormattedValue = (<XrmTSToolkit.Soap.OptionSetValue>Entity.Attributes["statuscode"]).FormattedValue;
                 if (!FormattedValue) { throw { description: "The formatted value was not returned" }; }
+                if (!Entity.LogicalName) { throw { description: "The 'LogicalName' is not populated" }; }
+                if (Entity.Id == "00000000-0000-0000-0000-000000000000") { throw { description: "The 'Id' is not populated" }; }
                 dfd.resolve(new TestResult(true, "Retrieve test succeeded", PriorTestResult.ResultValue));
             }
             catch (e) {
@@ -559,6 +582,52 @@ function WhoAmITest(PriorTestResult: TestResult): JQueryPromise<TestResult> {
     }).promise();
 }
 
+function CreateEmailTest(PriorTestResult: TestResult): JQueryPromise<TestResult> {
+    return $.Deferred<TestResult>(function (dfd) {
+        var Query = new XrmTSToolkit.Soap.Query.QueryExpression("contact");
+        Query.Columns = new XrmTSToolkit.Soap.ColumnSet(false);
+        var Promise = XrmTSToolkit.Soap.RetrieveMultiple(Query);
+        Promise.done(function (data: XrmTSToolkit.Soap.RetrieveMultipleSoapResponse, result, xhr) {
+            try {
+                if (!data.RetrieveMultipleResult.Entities || data.RetrieveMultipleResult.Entities.length <= 0) {
+                    throw "No records were returned from the CreateEmailTest test.";
+                }
+                else {
+                    var email = new XrmTSToolkit.Soap.Entity("email");
+                    email.Attributes["subject"] = "email subject";
+
+                    var fromActivityParties = new XrmTSToolkit.Soap.EntityCollection();
+                    var fromActivityParty = new XrmTSToolkit.Soap.Entity("activityparty");
+                    fromActivityParty.Attributes["partyid"] = new XrmTSToolkit.Soap.EntityReference(Xrm.Page.context.getUserId(), "systemuser");
+                    fromActivityParties.Items.push(fromActivityParty);
+                    email.Attributes["from"] = new XrmTSToolkit.Soap.EntityCollectionAttribute(fromActivityParties);
+
+                    var toActivityParties = new XrmTSToolkit.Soap.EntityCollection();
+                    $.each(data.RetrieveMultipleResult.Entities, function (index, recipient: XrmTSToolkit.Soap.Entity) {
+                        var toActivityParty = new XrmTSToolkit.Soap.Entity("activityparty");
+                        toActivityParty.Attributes["partyid"] = new XrmTSToolkit.Soap.EntityReference(recipient.Id, recipient.LogicalName);
+                        toActivityParties.Items.push(toActivityParty);
+                    });
+                    email.Attributes["to"] = new XrmTSToolkit.Soap.EntityCollectionAttribute(toActivityParties);
+
+                    XrmTSToolkit.Soap.Create(email).done(function (emailResponse) {
+                        var emailId = emailResponse.CreateResult;
+                        dfd.resolve(new TestResult(true, "CreateEmail test succeeded: " + emailId, PriorTestResult.ResultValue));
+                    }).fail(function (result) {
+                        dfd.reject(new TestResult(false, "CreateEmail test failed: " + result.faultstring, result));
+                    });
+                }
+            }
+            catch (e) {
+                dfd.reject(new TestResult(false, "Retrieve in CreateEmailTest succeeded but creating the email failed: " + e, PriorTestResult.ResultValue));
+            }
+        });
+        Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+            dfd.reject(new TestResult(false, "Create Email test failed: " + result.faultstring, result));
+        });
+    }).promise();
+}
+
 
 function FaultTest1(PriorTestResult: TestResult): JQueryPromise<TestResult> {
     //Try to update the deleted record
@@ -658,7 +727,7 @@ function DeleteTest2(PriorTestResult: TestResult): JQueryPromise<TestResult> {
 function ExecuteMultipleTest1(PriorTestResult: TestResult): JQueryPromise<TestResult> {
     //Create a new record first and then Update and Delete it in the execute multiple
     return $.Deferred<TestResult>(function (dfd) {
-        var CreatePromise = CreateEntityTest1();
+        var CreatePromise = CreateAccount();
         CreatePromise.done(function (CreateTestResult: TestResult) {
             var EntityId = CreateTestResult.ResultValue;
             var EntityToUpdate = new XrmTSToolkit.Soap.Entity("account", EntityId);

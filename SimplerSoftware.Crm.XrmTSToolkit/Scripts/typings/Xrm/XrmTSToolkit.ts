@@ -54,6 +54,13 @@
 *   Added the private members 'id', 'entityType', and 'name' to the Entity Reference class along with getters and setters for the public properties to allow an EntityReference object to be used
 *       directly with the Xrm.Page.setValue method when working with form scripts - removes the need to create a new object to pass as the value to a lookup attribute on a form.
 *   Added 'EntityReferenceCollection' as a possible type
+********************************************
+* Version : 0.8.1
+* Date: February 16, 2016
+*   Fixed an issue with deserialization of 'Entity' that was introduced in v0.8.0
+*       Added test to check for this issue
+*   Added the 'Serialize' method to the 'EntityCollectionAttribute' class
+*   Added a test illustrating the creation of an email
 */
 
 module XrmTSToolkit {
@@ -864,21 +871,21 @@ module XrmTSToolkit {
             /**
              * Constructor.
              *
-             * @param   {string}    logicalName Logical Name of the entity.
+             * @param   {string}    LogicalName Logical Name of the entity.
              */
-            constructor(logicalName: string);
+            constructor(LogicalName: string);
 
             /**
              * Constructor.
              *
-             * @param   {string}    logicalName Logical Name of the entity.
-             * @param   {string}    id          The GUID of the existing record.
+             * @param   {string}    LogicalName Logical Name of the entity.
+             * @param   {string}    Id          The GUID of the existing record.
              */
-            constructor(logicalName: string, id: string);
-            constructor(public logicalName?: string, public id?: string) {
+            constructor(LogicalName: string, Id: string);
+            constructor(public LogicalName?: string, public Id?: string) {
                 this.Attributes = new AttributeCollection();
-                if (!id) {
-                    this.id = "00000000-0000-0000-0000-000000000000";
+                if (!Id) {
+                    this.Id = "00000000-0000-0000-0000-000000000000";
                 }
             }
 
@@ -906,8 +913,8 @@ module XrmTSToolkit {
                     data += "</a:KeyValuePairOfstringanyType>";
                 }
                 data += "</a:Attributes><a:EntityState i:nil=\"true\" /><a:FormattedValues />";
-                data += "<a:Id>" + Entity.EncodeValue(this.id) + "</a:Id>";
-                data += "<a:LogicalName>" + this.logicalName + "</a:LogicalName>";
+                data += "<a:Id>" + Entity.EncodeValue(this.Id) + "</a:Id>";
+                data += "<a:LogicalName>" + this.LogicalName + "</a:LogicalName>";
                 data += "<a:RelatedEntities />";
                 return data;
             }
@@ -1083,6 +1090,20 @@ module XrmTSToolkit {
         export class EntityCollectionAttribute extends AttributeValue {
             constructor(public Value: EntityCollection) { super(Value, AttributeType.EntityCollection); }
             GetValueType(): string { return "a:ArrayOfEntity"; }
+            Serialize(): string {
+                var data: string = "";
+                if (this.Value.Items.length > 0) {
+                    data += "<b:value i:type=\"" + this.GetValueType() + "\">";
+                    $.each(this.Value.Items, function (i, entity) {
+                        data += "<a:Entity>" + entity.Serialize() + "</a:Entity>";
+                    });
+                    data += "</b:value>";
+                }
+                else {
+                    data += "<b:value i:nil=\"true\" />";
+                }
+                return data;
+            }
         }
         export class EntityReference extends AttributeValue {
             PropertyTypes = {
