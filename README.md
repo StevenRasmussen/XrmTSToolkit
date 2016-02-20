@@ -33,13 +33,14 @@ The following methods are supported:
 * RevokeAccessRequest
 * RetrievePrincipleAccessRequest
 
+#### Other Organization Requests
+Any organization request not listed above can easily be implemented by inheriting from the 'ExecuteRequest' class. An example is shown below illustrating how the 'CreateRequest' is implemented. Additional requests may be added to the XrmTSToolkit as deemed necessary or perhaps a separate TypeScript file will be created that will contain additional organization requests.  Please submit an issue on GitHub for consideration of another request to be added to the main library.
+
 #### Custom Actions
 You can execute your own custom actions very easily by following the example given below.
 
-#### Retrieve Metadat
+#### Retrieve Metadata
 XrmTSToolkit allows you To retrieve entity metadata from CRM.
-
-Other organization requests not listed can easily be implemented by inheriting from the 'ExecuteRequest' class. An example is shown below how the 'CreateRequest' is implemented so that you can create your own requests as needed. Additional requests may be added to the XrmTSToolkit as deemed necessary or perhaps a separate TypeScript file will be created that will contain additional organization requests.  Please submit an issue on GitHub for consideration of another request to be added to the main library.
 
 ### REST methods
 XrmTSToolkit does not support the REST endpoint.  This may be added in a future release.
