@@ -33,6 +33,12 @@ The following methods are supported:
 * RevokeAccessRequest
 * RetrievePrincipleAccessRequest
 
+#### Custom Actions
+You can execute your own custom actions very easily by following the example given below.
+
+#### Retrieve Metadat
+XrmTSToolkit allows you To retrieve entity metadata from CRM.
+
 Other organization requests not listed can easily be implemented by inheriting from the 'ExecuteRequest' class. An example is shown below how the 'CreateRequest' is implemented so that you can create your own requests as needed. Additional requests may be added to the XrmTSToolkit as deemed necessary or perhaps a separate TypeScript file will be created that will contain additional organization requests.  Please submit an issue on GitHub for consideration of another request to be added to the main library.
 
 ### REST methods
@@ -402,6 +408,38 @@ promise.done(function (data: XrmTSToolkit.Soap.RetrievePrincipleAccessResponse, 
 });
 promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
     //Retrieve principal access failed
+});
+```
+
+### Custom Actions
+To use custom actions it is required that you create a new TypeScript class that extends the 'ExecuteRequest' class.  The following is an example of how to accomplish it:
+
+```typescript
+export class CustomActionRequest extends XrmTSToolkit.Soap.ExecuteRequest {
+	constructor(account: XrmTSToolkit.Soap.EntityReference, stringValue: string) {
+		super("new_CustomActionName"); //This is the name of the custom action defined in CRM
+        this.Parameters["Target"] = account;
+        this.Parameters["StringValue"] = stringValue;
+        this.IsCustomAction = true;  //Set this in order to let XrmTSToolkit know How to serialize the request.
+	}
+}
+```
+
+You can also choose To create an appropriate response to make it easier to read any results:
+```typescript
+export class CustomActionResponse extends XrmTSToolkit.Soap.ExecuteResponse {
+	Result: string;
+}
+```
+
+To execute the custom action, you simply instantiate an instance of your custom action request and pass it to the 'execute' method:
+```typescript
+var customActionRequest = new CustomActionRequest(new XrmTSToolkit.Soap.EntityReference("9C8AF527-2D96-4ADB-9C0B-A21BF460CDDA", "account"), "some string value");
+XrmTSToolkit.Soap.Execute(customActionRequest).done(function (executeResponse:CustomActionResponse) {
+	//Custom action executed successfully
+	var result = executeResponse.Result;
+}).fail(function (error) {
+	//Custom action failed
 });
 ```
 

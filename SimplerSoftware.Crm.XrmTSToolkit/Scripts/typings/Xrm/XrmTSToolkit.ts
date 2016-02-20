@@ -4,7 +4,7 @@
 /**
 * MSCRM 2011, 2013, 2015, 2016 Service Toolkit for TypeScript
 * @author Steven Rasmussen
-* @current version : 0.8.1
+* @current version : 0.8.2
 * Credits:
 *   The idea of this library was inspired by David Berry and Jaime Ji's XrmServiceToolkit.js
 *    
@@ -61,6 +61,12 @@
 *       Added test to check for this issue
 *   Added the 'Serialize' method to the 'EntityCollectionAttribute' class
 *   Added a test illustrating the creation of an email
+********************************************
+* Version : 0.8.2
+* Date: February 18, 2016
+*   Fixed issues with 'public' properties that had been made lowercase in v0.8.0
+*   Added the abillity to create a custom action class
+*   Added new example showing how to execute a custom action
 */
 
 module XrmTSToolkit {
@@ -633,9 +639,9 @@ module XrmTSToolkit {
             Serialize(): string;
         }
         export class SoapResponse {
-            constructor(public responseXML: string) { }
+            constructor(public ResponseXML: string) { }
             ParseResult(): void {
-                this.ParseResultInernal(this.responseXML);
+                this.ParseResultInernal(this.ResponseXML);
             }
             PropertyTypes = new PropertyTypeCollection();
 
@@ -1013,7 +1019,7 @@ module XrmTSToolkit {
             [index: string]: AttributeValue | boolean | string;
         }
         export class ParameterCollection {
-            [index: string]: ISerializable;
+            [index: string]: ISerializable | boolean | string;
         }
         export class StringDictionary<T> {
             [index: string]: T;
@@ -1158,60 +1164,60 @@ module XrmTSToolkit {
             }
         }
         export class OptionSetValue extends AttributeValue {
-            constructor(public value?: number) { super(value, AttributeType.OptionSetValue); }
+            constructor(public Value?: number) { super(Value, AttributeType.OptionSetValue); }
             Serialize(): string {
                 return "<b:value i:type=\"a:OptionSetValue\"><a:Value>" + this.GetEncodedValue() + "</a:Value></b:value>";
             }
             GetValueType(): string { return "a:OptionSetValue"; }
         }
         export class MoneyValue extends AttributeValue {
-            constructor(public value?: number) { super(value, AttributeType.Money); }
+            constructor(public Value?: number) { super(Value, AttributeType.Money); }
             Serialize(): string {
                 return "<b:value i:type=\"a:Money\"><a:Value>" + this.GetEncodedValue() + "</a:Value></b:value>";
             }
             GetValueType(): string { return "a:Money"; }
         }
         export class AliasedValue extends AttributeValue {
-            constructor(public value?: AttributeValue, public attributeLogicalName?: string, public entityLogicalName?: string) { super(value, AttributeType.AliasedValue); }
+            constructor(public Value?: AttributeValue, public AttributeLogicalName?: string, public EntityLogicalName?: string) { super(Value, AttributeType.AliasedValue); }
             Serialize(): string { throw "Update the 'Serialize' method of the 'AliasedValue'"; }
             GetValueType(): string { throw "Update the 'GetValueType' method of the 'AliasedValue'"; }
         }
         export class BooleanValue extends AttributeValue {
-            constructor(public value?: boolean) { super(value, AttributeType.Boolean); }
+            constructor(public Value?: boolean) { super(Value, AttributeType.Boolean); }
             GetValueType(): string { return "c:boolean"; }
         }
         export class IntegerValue extends AttributeValue {
-            constructor(public value?: number) { super(value, AttributeType.Integer); }
+            constructor(public Value?: number) { super(Value, AttributeType.Integer); }
             GetValueType(): string { return "c:int"; }
         }
         export class StringValue extends AttributeValue {
-            constructor(public value?: string) { super(value, AttributeType.String); }
+            constructor(public Value?: string) { super(Value, AttributeType.String); }
             GetValueType(): string { return "c:string"; }
         }
         export class DoubleValue extends AttributeValue {
-            constructor(public value?: number) { super(value, AttributeType.Double); }
+            constructor(public Value?: number) { super(Value, AttributeType.Double); }
             GetValueType(): string { return "c:double"; }
         }
         export class DecimalValue extends AttributeValue {
-            constructor(public value?: number) { super(value, AttributeType.Decimal); }
+            constructor(public Value?: number) { super(Value, AttributeType.Decimal); }
             GetValueType(): string { return "c:decimal"; }
         }
         export class FloatValue extends AttributeValue {
-            constructor(public value?: number) { super(value, AttributeType.Float); }
+            constructor(public Value?: number) { super(Value, AttributeType.Float); }
             GetValueType(): string { return "c:double"; }
         }
         export class DateValue extends AttributeValue {
-            constructor(public value?: Date) { super(value, AttributeType.Date); }
+            constructor(public Value?: Date) { super(Value, AttributeType.Date); }
             GetEncodedValue(): string {
-                return Entity.EncodeDate(this.value);
+                return Entity.EncodeDate(this.Value);
             }
             GetValueType(): string { return "c:dateTime"; }
         }
         export class GuidValue extends AttributeValue {
-            constructor(public value?: string) {
-                super(value, AttributeType.Guid);
-                if (!value) {
-                    this.value = "00000000-0000-0000-0000-000000000000";
+            constructor(public Value?: string) {
+                super(Value, AttributeType.Guid);
+                if (!Value) {
+                    this.Value = "00000000-0000-0000-0000-000000000000";
                 }
             }
             GetValueType(): string { return "e:guid"; }
@@ -1345,7 +1351,7 @@ module XrmTSToolkit {
              *
              * @param   {string}    EntityName  Logical Name of the entity.
              */
-            constructor(public entityName?: string) { }
+            constructor(public EntityName?: string) { }
 
             Columns: ColumnSet = new ColumnSet(false);
             Criteria: FilterExpression = null;
@@ -1372,7 +1378,7 @@ module XrmTSToolkit {
                 }
 
                 data += "<a:Distinct>false</a:Distinct>";
-                data += "<a:EntityName>" + this.entityName + "</a:EntityName>";
+                data += "<a:EntityName>" + this.EntityName + "</a:EntityName>";
 
                 //Link Entities
                 if (this.LinkEntities.length == 0) {
@@ -1482,26 +1488,26 @@ module XrmTSToolkit {
             /**
              * Constructor.
              *
-             * @param   {string}    attributeName       Name of the attribute.
-             * @param   {ConditionOperator} operator    The comparison operator.
+             * @param   {string}    AttributeName       Name of the attribute.
+             * @param   {ConditionOperator} Operator    The comparison operator.
              * @param   {AttributeValue}    value       The value to be compared to.
              */
-            constructor(attributeName: string, operator: ConditionOperator, value?: AttributeValue);
+            constructor(AttributeName: string, Operator: ConditionOperator, Value?: AttributeValue);
 
             /**
              * Constructor.
              *
-             * @param   {string}    attributeName       Name of the attribute.
-             * @param   {ConditionOperator} operator    The comparison operator.
+             * @param   {string}    AttributeName       Name of the attribute.
+             * @param   {ConditionOperator} Operator    The comparison operator.
              * @param   {Array{AttributeValue}} values  The values to be compared to.
              */
-            constructor(attributeName: string, operator: ConditionOperator, values?: Array<AttributeValue>);
-            constructor(public attributeName?: string, public operator?: ConditionOperator, values?: any) {
-                if (values instanceof Array) {
-                    this.Values = values;
+            constructor(AttributeName: string, Operator: ConditionOperator, Values?: Array<AttributeValue>);
+            constructor(public AttributeName?: string, public Operator?: ConditionOperator, Values?: any) {
+                if (Values instanceof Array) {
+                    this.Values = Values;
                 }
                 else {
-                    this.Values.push(values);
+                    this.Values.push(Values);
                 }
             }
 
@@ -1510,8 +1516,8 @@ module XrmTSToolkit {
             serialize(): string {
                 var data: string =
                     "<a:ConditionExpression>" +
-                    "<a:AttributeName>" + this.attributeName + "</a:AttributeName>" +
-                    "<a:Operator>" + ConditionOperator[this.operator].toString() + "</a:Operator>" +
+                    "<a:AttributeName>" + this.AttributeName + "</a:AttributeName>" +
+                    "<a:Operator>" + ConditionOperator[this.Operator].toString() + "</a:Operator>" +
                     "<a:Values>";
                 $.each(this.Values, function (i, value) {
                     data += "<f:anyType i:type=\"" + value.GetValueType() + "\">" + value.GetEncodedValue() + "</f:anyType>";
@@ -1549,15 +1555,15 @@ module XrmTSToolkit {
             /**
              * Constructor.
              *
-             * @param   {string}    attributeName   Name of the attribute.
-             * @param   {OrderType} orderType       Type of the order.
+             * @param   {string}    AttributeName   Name of the attribute.
+             * @param   {OrderType} OrderType       Type of the order.
              */
             constructor(attributeName: string, orderType: OrderType);
-            constructor(public attributeName?: string, public orderType?: OrderType) { }
+            constructor(public AttributeName?: string, public OrderType?: OrderType) { }
             serialize(): string {
                 var data: string = "<a:OrderExpression>";
-                data += "<a:AttributeName>" + this.attributeName + "</a:AttributeName>";
-                data += "<a:OrderType>" + OrderType[this.orderType].toString() + "</a:OrderType>";
+                data += "<a:AttributeName>" + this.AttributeName + "</a:AttributeName>";
+                data += "<a:OrderType>" + OrderType[this.OrderType].toString() + "</a:OrderType>";
                 data += "</a:OrderExpression>";
                 return data;
             }
@@ -1567,20 +1573,20 @@ module XrmTSToolkit {
             /**
              * Constructor.
              *
-             * @param   {string}    linkFromEntityName                  LogicalName of the link from entity.
-             * @param   {string}    linkToEntityName                    LogicalName of the link to entity.
-             * @param   {string}    linkFromAttributeName               LogicalName of the link from
+             * @param   {string}    LinkFromEntityName                  LogicalName of the link from entity.
+             * @param   {string}    LinkToEntityName                    LogicalName of the link to entity.
+             * @param   {string}    LinkFromAttributeName               LogicalName of the link from
              *                                                          attribute.
-             * @param   {string}    linkToAttributeName                 LogicalName of the link to attribute.
-             * @param   {JoinOperator}  optional public joinOperator    JoinOperator    The optional join
+             * @param   {string}    LinkToAttributeName                 LogicalName of the link to attribute.
+             * @param   {JoinOperator}  optional public JoinOperator    JoinOperator    The optional join
              *                                                          operator.
              */
             constructor(
-                public linkFromEntityName: string,
-                public linkToEntityName: string,
-                public linkFromAttributeName: string,
-                public linkToAttributeName: string,
-                public joinOperator: JoinOperator = Soap.Query.JoinOperator.Inner) { }
+                public LinkFromEntityName: string,
+                public LinkToEntityName: string,
+                public LinkFromAttributeName: string,
+                public LinkToAttributeName: string,
+                public JoinOperator: JoinOperator = Soap.Query.JoinOperator.Inner) { }
 
             Columns: ColumnSet = new ColumnSet(false);
             EntityAlias: string = null;
@@ -1596,7 +1602,7 @@ module XrmTSToolkit {
                 else {
                     data += "<a:EntityAlias>" + this.EntityAlias + "</a:EntityAlias>";
                 }
-                data += "<a:JoinOperator>" + JoinOperator[this.joinOperator].toString() + "</a:JoinOperator>";
+                data += "<a:JoinOperator>" + JoinOperator[this.JoinOperator].toString() + "</a:JoinOperator>";
                 data += " <a:LinkCriteria>";
                 data += this.LinkCriteria.serialize();
                 data += "</a:LinkCriteria>";
@@ -1610,10 +1616,10 @@ module XrmTSToolkit {
                     });
                     data += "</a:LinkEntities>";
                 }
-                data += "<a:LinkFromAttributeName>" + this.linkFromAttributeName + "</a:LinkFromAttributeName>";
-                data += "<a:LinkFromEntityName>" + this.linkFromEntityName + "</a:LinkFromEntityName>";
-                data += "<a:LinkToAttributeName>" + this.linkToAttributeName + "</a:LinkToAttributeName>";
-                data += "<a:LinkToEntityName>" + this.linkToEntityName + "</a:LinkToEntityName>";
+                data += "<a:LinkFromAttributeName>" + this.LinkFromAttributeName + "</a:LinkFromAttributeName>";
+                data += "<a:LinkFromEntityName>" + this.LinkFromEntityName + "</a:LinkFromEntityName>";
+                data += "<a:LinkToAttributeName>" + this.LinkToAttributeName + "</a:LinkToAttributeName>";
+                data += "<a:LinkToEntityName>" + this.LinkToEntityName + "</a:LinkToEntityName>";
                 data += "</a:LinkEntity>";
                 return data;
             }
@@ -1727,44 +1733,52 @@ module XrmTSToolkit {
             /**
              * Constructor.
              *
-             * @param   {string}    requestName             Name of the request.
-             * @param   {string}    requestType             Type of the request. Required if Request type
+             * @param   {string}    RequestName             Name of the request.
+             * @param   {string}    RequestType             Type of the request. Required if Request type
              *                                              differs from pattern: "[RequestName]Type" or if
              *                                              the RequestType namesapce differs from "g" in the
              *                                              global list of namespaces.
-             * @param   {ParameterCollection}   parameters  Parameters for the operation.
+             * @param   {ParameterCollection}   Parameters  Parameters for the operation.
              */
-            constructor(public requestName: string, public requestType?: string, public parameters?: ParameterCollection) {
-                if (!parameters || parameters == null) {
-                    this.parameters = new ParameterCollection();
+            constructor(public RequestName: string, public RequestType?: string, public Parameters?: ParameterCollection) {
+                if (!Parameters || Parameters == null) {
+                    this.Parameters = new ParameterCollection();
                 }
-                if (!requestType || requestType == null) {
-                    this.requestType = "g:" + this.requestName + "Request";
+                if (!RequestType || RequestType == null) {
+                    this.RequestType = "g:" + this.RequestName + "Request";
                 }
             }
             RequestId: string;
             ExecuteRequestType: string = "request";
             IncludeExecuteHeader: boolean = true;
+            IsCustomAction: boolean = false;
             Serialize(): string {
                 var xml = "";
                 if (this.IncludeExecuteHeader) { xml += "<Execute" + Soap.GetNameSpacesXML() + ">"; }
-                xml += "<" + this.ExecuteRequestType + " i:type='" + this.requestType + "'><a:Parameters>";
-                for (var parameterName in this.parameters) {
-                    var parameter = this.parameters[parameterName];
+                if (this.IsCustomAction)
+                    xml += "<request><a:Parameters>";
+                else
+                    xml += "<" + this.ExecuteRequestType + " i:type='" + this.RequestType + "'><a:Parameters>";
+
+                for (var parameterName in this.Parameters) {
+                    var parameter = this.Parameters[parameterName];
 
                     xml += "<a:KeyValuePairOfstringanyType>";
                     xml += "<b:key>" + parameterName + "</b:key>";
-                    if (parameter instanceof Soap.Entity) {
+                    if (parameter instanceof Soap.Entity)
                         xml += "<b:value i:type=\"a:Entity\">" + parameter.Serialize() + "</b:value>";
-                    }
-                    else {
+                    else if (typeof parameter === "boolean")
+                        xml += new BooleanValue(parameter).Serialize();
+                    else if (typeof parameter === "string")
+                        xml += new StringValue(parameter).Serialize();
+                    else
                         xml += parameter.Serialize();
-                    }
+
                     xml += "</a:KeyValuePairOfstringanyType>";
                 }
                 xml += "</a:Parameters>";
                 xml += "<a:RequestId i:nil = \"true\" />";
-                xml += "<a:RequestName>" + this.requestName + "</a:RequestName>";
+                xml += "<a:RequestName>" + this.RequestName + "</a:RequestName>";
                 xml += "</" + this.ExecuteRequestType + ">";
                 if (this.IncludeExecuteHeader) { xml += "</Execute>"; }
                 return xml;
@@ -1787,7 +1801,7 @@ module XrmTSToolkit {
              */
             constructor(target: Entity) {
                 super("Create", "a:CreateRequest");
-                this.parameters["Target"] = target;
+                this.Parameters["Target"] = target;
             }
         }
         export class CreateResponse extends ExecuteResponse {
@@ -1797,7 +1811,7 @@ module XrmTSToolkit {
                 this.PropertyTypes["CreateResult"] = "s";
             }
             ParseResult(): void {
-                super.ParseResultInernal(this.responseXML);
+                super.ParseResultInernal(this.ResponseXML);
                 if ((<any>this).CreateResult) {
                     this.id = (<any>this).CreateResult;
                 }
@@ -1813,7 +1827,7 @@ module XrmTSToolkit {
              */
             constructor(target: Entity) {
                 super("Update", "a:UpdateRequest");
-                this.parameters["Target"] = target;
+                this.Parameters["Target"] = target;
             }
         }
         export class UpdateResponse extends ExecuteResponse { }
@@ -1826,7 +1840,7 @@ module XrmTSToolkit {
              */
             constructor(target: EntityReference) {
                 super("Delete", "a:DeleteRequest");
-                this.parameters["Target"] = target;
+                this.Parameters["Target"] = target;
             }
         }
         export class DeleteResponse extends ExecuteResponse { }
@@ -1848,9 +1862,9 @@ module XrmTSToolkit {
              */
             constructor(moniker1: Soap.EntityReference, moniker2: Soap.EntityReference, relationshipName: string) {
                 super("AssociateEntities");
-                this.parameters["Moniker1"] = moniker1;
-                this.parameters["Moniker2"] = moniker2;
-                this.parameters["RelationshipName"] = new Soap.StringValue(relationshipName);
+                this.Parameters["Moniker1"] = moniker1;
+                this.Parameters["Moniker2"] = moniker2;
+                this.Parameters["RelationshipName"] = new Soap.StringValue(relationshipName);
             }
         }
         export class AssociateResponse extends ExecuteResponse { }
@@ -1865,9 +1879,9 @@ module XrmTSToolkit {
              */
             constructor(moniker1: Soap.EntityReference, moniker2: Soap.EntityReference, relationshipName: string) {
                 super("DisassociateEntities");
-                this.parameters["Moniker1"] = moniker1;
-                this.parameters["Moniker2"] = moniker2;
-                this.parameters["RelationshipName"] = new Soap.StringValue(relationshipName);
+                this.Parameters["Moniker1"] = moniker1;
+                this.Parameters["Moniker2"] = moniker2;
+                this.Parameters["RelationshipName"] = new Soap.StringValue(relationshipName);
             }
         }
         export class DisassociateResponse extends ExecuteResponse { }
@@ -1898,10 +1912,10 @@ module XrmTSToolkit {
                 var statusOptionSet: Soap.OptionSetValue;
                 if (typeof status === "number") { statusOptionSet = new Soap.OptionSetValue(status); }
                 else { statusOptionSet = status; }
-                this.parameters = new Soap.ParameterCollection();
-                this.parameters["EntityMoniker"] = entityMoniker;
-                this.parameters["State"] = stateOptionSet;
-                this.parameters["Status"] = statusOptionSet;
+                this.Parameters = new Soap.ParameterCollection();
+                this.Parameters["EntityMoniker"] = entityMoniker;
+                this.Parameters["State"] = stateOptionSet;
+                this.Parameters["Status"] = statusOptionSet;
             }
         }
         export class SetStateResponse extends ExecuteResponse { }
@@ -1931,8 +1945,8 @@ module XrmTSToolkit {
              */
             constructor(assignee: EntityReference, target: EntityReference) {
                 super("Assign");
-                this.parameters["Assignee"] = assignee;
-                this.parameters["Target"] = target;
+                this.Parameters["Assignee"] = assignee;
+                this.Parameters["Target"] = target;
             }
         }
         export class AssignResponse extends ExecuteResponse { }
@@ -1951,7 +1965,7 @@ module XrmTSToolkit {
             }
             Serialize(): string {
                 var xml = "<Execute" + Soap.GetNameSpacesXML() + ">";
-                xml += "<request i:type='" + this.requestType + "'><a:Parameters>";
+                xml += "<request i:type='" + this.RequestType + "'><a:Parameters>";
                 xml += "<a:KeyValuePairOfstringanyType><b:key>Requests</b:key><b:value i:type=\"l:OrganizationRequestCollection\">";
                 $.each(this.Requests, function (i, request) {
                     request.ExecuteRequestType = "l:OrganizationRequest";
@@ -1974,8 +1988,8 @@ module XrmTSToolkit {
             /**
              * Constructor.
              *
-             * @param   {boolean}   optional public continueOnError true to continue on error otherwise false.
-             * @param   {boolean}   optional public returnResponses true to return the individual responses otherwise false.
+             * @param   {boolean}   optional public ContinueOnError true to continue on error otherwise false.
+             * @param   {boolean}   optional public ReturnResponses true to return the individual responses otherwise false.
              */
             constructor(public ContinueOnError: boolean = false, public ReturnResponses: boolean = false) { }
             Serialize(): string {
@@ -2015,8 +2029,8 @@ module XrmTSToolkit {
              */
             constructor(target: EntityReference, principal: EntityReference, accessMask: Soap.AccessRights) {
                 super("GrantAccess");
-                this.parameters["Target"] = target;
-                this.parameters["PrincipalAccess"] = new PrincipalAccess(accessMask, principal);
+                this.Parameters["Target"] = target;
+                this.Parameters["PrincipalAccess"] = new PrincipalAccess(accessMask, principal);
             }
         }
         export class GrantAccessResponse extends ExecuteResponse { }
@@ -2031,8 +2045,8 @@ module XrmTSToolkit {
              */
             constructor(target: EntityReference, principal: EntityReference, accessMask: AccessRights) {
                 super("ModifyAccess");
-                this.parameters["Target"] = target;
-                this.parameters["PrincipalAccess"] = new PrincipalAccess(accessMask, principal);
+                this.Parameters["Target"] = target;
+                this.Parameters["PrincipalAccess"] = new PrincipalAccess(accessMask, principal);
             }
         }
         export class ModifyAccessResponse extends ExecuteResponse { }
@@ -2046,8 +2060,8 @@ module XrmTSToolkit {
              */
             constructor(target: EntityReference, revokee: EntityReference) {
                 super("RevokeAccess");
-                this.parameters["Target"] = target;
-                this.parameters["Revokee"] = revokee;
+                this.Parameters["Target"] = target;
+                this.Parameters["Revokee"] = revokee;
             }
         }
         export class RevokeAccessResponse extends ExecuteResponse { }
@@ -2061,8 +2075,8 @@ module XrmTSToolkit {
              */
             constructor(target: EntityReference, principal: EntityReference) {
                 super("RetrievePrincipalAccess");
-                this.parameters["Target"] = target;
-                this.parameters["Principal"] = principal;
+                this.Parameters["Target"] = target;
+                this.Parameters["Principal"] = principal;
             }
         }
         export class RetrievePrincipleAccessResponse extends ExecuteResponse {
@@ -2073,11 +2087,11 @@ module XrmTSToolkit {
             AccessRights: Array<AccessRights>;
         }
         export class PrincipalAccess implements Soap.ISerializable {
-            constructor(public accessMask: AccessRights, public principal: EntityReference) { }
+            constructor(public AccessMask: AccessRights, public Principal: EntityReference) { }
             Serialize(): string {
-                var xml = "<b:value i:type=\"g:PrincipalAccess\"><g:AccessMask>" + AccessRights[this.accessMask].toString() + "</g:AccessMask>";
-                xml += "<g:Principal><a:Id>" + Soap.Entity.EncodeValue(this.principal.Id) + "</a:Id>";
-                xml += "<a:LogicalName>" + Soap.Entity.EncodeValue(this.principal.LogicalName) + "</a:LogicalName><a:Name i:nil=\"true\" />";
+                var xml = "<b:value i:type=\"g:PrincipalAccess\"><g:AccessMask>" + AccessRights[this.AccessMask].toString() + "</g:AccessMask>";
+                xml += "<g:Principal><a:Id>" + Soap.Entity.EncodeValue(this.Principal.Id) + "</a:Id>";
+                xml += "<a:LogicalName>" + Soap.Entity.EncodeValue(this.Principal.LogicalName) + "</a:LogicalName><a:Name i:nil=\"true\" />";
                 xml += "</g:Principal></b:value>";
                 return xml;
             }
@@ -2096,10 +2110,10 @@ module XrmTSToolkit {
         export class RetrieveEntityRequest extends ExecuteRequest {
             constructor(logicalName: string, filters: Array<EntityFilters>, retrieveAsIfPublished: boolean = true) {
                 super("RetrieveEntity", "a:RetrieveEntityRequest");
-                this.parameters["EntityFilters"] = new EntityFilterCollection(filters);
-                this.parameters["MetadataId"] = new GuidValue("00000000-0000-0000-0000-000000000000");
-                this.parameters["RetrieveAsIfPublished"] = new BooleanValue(true);
-                this.parameters["LogicalName"] = new StringValue(logicalName);
+                this.Parameters["EntityFilters"] = new EntityFilterCollection(filters);
+                this.Parameters["MetadataId"] = new GuidValue("00000000-0000-0000-0000-000000000000");
+                this.Parameters["RetrieveAsIfPublished"] = new BooleanValue(true);
+                this.Parameters["LogicalName"] = new StringValue(logicalName);
             }
         }
         export class RetrieveEntityResponse extends ExecuteResponse {
