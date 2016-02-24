@@ -4,13 +4,13 @@
 /**
 * MSCRM 2011, 2013, 2015, 2016 Service Toolkit for TypeScript
 * @author Steven Rasmussen
-* @current version : 0.8.2
+* @current version : 0.8.3
 * Credits:
 *   The idea of this library was inspired by David Berry and Jaime Ji's XrmServiceToolkit.js
 *    
 * Date: March 12, 2015
 * 
-* Required TypeScript Version: 1.4
+* Required TypeScript Version: 1.7.6
 * 
 * Required external libraries:
 *   jquery.d.ts - Downloaded from Nuget and included in the project
@@ -67,6 +67,10 @@
 *   Fixed issues with 'public' properties that had been made lowercase in v0.8.0
 *   Added the abillity to create a custom action class
 *   Added new example showing how to execute a custom action
+********************************************
+* Version : 0.8.3
+* Date: February 24, 2016
+*   Fixed serialization issue when using numbers or strings as a value in a filter condition
 */
 
 module XrmTSToolkit {
@@ -1492,7 +1496,7 @@ module XrmTSToolkit {
              * @param   {ConditionOperator} Operator    The comparison operator.
              * @param   {AttributeValue}    value       The value to be compared to.
              */
-            constructor(AttributeName: string, Operator: ConditionOperator, Value?: AttributeValue);
+            constructor(AttributeName: string, Operator: ConditionOperator, Value?: AttributeValue | string | boolean);
 
             /**
              * Constructor.
@@ -1501,7 +1505,7 @@ module XrmTSToolkit {
              * @param   {ConditionOperator} Operator    The comparison operator.
              * @param   {Array{AttributeValue}} values  The values to be compared to.
              */
-            constructor(AttributeName: string, Operator: ConditionOperator, Values?: Array<AttributeValue>);
+            constructor(AttributeName: string, Operator: ConditionOperator, Values?: Array<AttributeValue | string | boolean>);
             constructor(public AttributeName?: string, public Operator?: ConditionOperator, Values?: any) {
                 if (Values instanceof Array) {
                     this.Values = Values;
@@ -1511,7 +1515,7 @@ module XrmTSToolkit {
                 }
             }
 
-            Values: Array<AttributeValue> = [];
+            Values: Array<AttributeValue | string | boolean> = [];
 
             serialize(): string {
                 var data: string =
@@ -1520,7 +1524,16 @@ module XrmTSToolkit {
                     "<a:Operator>" + ConditionOperator[this.Operator].toString() + "</a:Operator>" +
                     "<a:Values>";
                 $.each(this.Values, function (i, value) {
-                    data += "<f:anyType i:type=\"" + value.GetValueType() + "\">" + value.GetEncodedValue() + "</f:anyType>";
+                    if (typeof value === "string") {
+                        var stringValue = new StringValue(value);
+                        data += "<f:anyType i:type=\"" + stringValue.GetValueType() + "\">" + stringValue.GetEncodedValue() + "</f:anyType>";
+                    }
+                    else if (typeof value === "boolean") {
+                        var boolValue = new BooleanValue(value);
+                        data += "<f:anyType i:type=\"" + boolValue.GetValueType() + "\">" + boolValue.GetEncodedValue() + "</f:anyType>";
+                    }
+                    else
+                        data += "<f:anyType i:type=\"" + value.GetValueType() + "\">" + value.GetEncodedValue() + "</f:anyType>";
                 });
                 data += "</a:Values>" +
                     "</a:ConditionExpression>";
