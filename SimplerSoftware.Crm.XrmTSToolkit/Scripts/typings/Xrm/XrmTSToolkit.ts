@@ -4,13 +4,13 @@
 /**
 * MSCRM 2011, 2013, 2015, 2016 Service Toolkit for TypeScript
 * @author Steven Rasmussen
-* @current version : 0.8.3
+* @current version : 0.8.4
 * Credits:
 *   The idea of this library was inspired by David Berry and Jaime Ji's XrmServiceToolkit.js
 *    
-* Date: March 12, 2015
+* Date: March 2, 2016
 * 
-* Required TypeScript Version: 1.7.6
+* Required TypeScript Version: 1.8.6
 * 
 * Required external libraries:
 *   jquery.d.ts - Downloaded from Nuget and included in the project
@@ -71,6 +71,11 @@
 * Version : 0.8.3
 * Date: February 24, 2016
 *   Fixed serialization issue when using numbers or strings as a value in a filter condition
+********************************************
+* Version : 0.8.4
+* Date: March 2, 2016
+*   Updated to TypeScript v1.8.6
+*   Added the ability to just use a 'Date' value instead of needing to create a 'DateValue' for both attributes and condition expressions.
 */
 
 module XrmTSToolkit {
@@ -434,7 +439,7 @@ module XrmTSToolkit {
             }
             return serialized;
         }
-        
+
         /**
          * Performs an 'Execute' request.
          *
@@ -911,8 +916,11 @@ module XrmTSToolkit {
                     var attribute = this.Attributes[attributeName];
                     data += "<a:KeyValuePairOfstringanyType>";
                     data += "<b:key>" + attributeName + "</b:key>";
+
                     if (attribute === null || (attribute instanceof AttributeValue && attribute.IsNull()))
                         data += "<b:value i:nil=\"true\" />";
+                    else if (attribute instanceof Date)
+                        data += new DateValue(attribute).Serialize();
                     else if (typeof attribute === "boolean")
                         data += new BooleanValue(attribute).Serialize();
                     else if (typeof attribute === "string")
@@ -1020,10 +1028,10 @@ module XrmTSToolkit {
         }
         export class EntityReferenceCollection extends Array<Soap.EntityReference>{ }
         export class AttributeCollection {
-            [index: string]: AttributeValue | boolean | string;
+            [index: string]: AttributeValue | boolean | string | Date;
         }
         export class ParameterCollection {
-            [index: string]: ISerializable | boolean | string;
+            [index: string]: ISerializable | boolean | string | Date;
         }
         export class StringDictionary<T> {
             [index: string]: T;
@@ -1395,7 +1403,7 @@ module XrmTSToolkit {
                     });
                     data += "</a:LinkEntities>";
                 }
-                   
+
                 //Sorting
                 if (this.Orders.length == 0) {
                     data += "<a:Orders />";
@@ -1496,7 +1504,7 @@ module XrmTSToolkit {
              * @param   {ConditionOperator} Operator    The comparison operator.
              * @param   {AttributeValue}    value       The value to be compared to.
              */
-            constructor(AttributeName: string, Operator: ConditionOperator, Value?: AttributeValue | string | boolean);
+            constructor(AttributeName: string, Operator: ConditionOperator, Value?: AttributeValue | string | boolean | Date);
 
             /**
              * Constructor.
@@ -1505,7 +1513,7 @@ module XrmTSToolkit {
              * @param   {ConditionOperator} Operator    The comparison operator.
              * @param   {Array{AttributeValue}} values  The values to be compared to.
              */
-            constructor(AttributeName: string, Operator: ConditionOperator, Values?: Array<AttributeValue | string | boolean>);
+            constructor(AttributeName: string, Operator: ConditionOperator, Values?: Array<AttributeValue | string | boolean | Date>);
             constructor(public AttributeName?: string, public Operator?: ConditionOperator, Values?: any) {
                 if (Values instanceof Array) {
                     this.Values = Values;
@@ -1515,7 +1523,7 @@ module XrmTSToolkit {
                 }
             }
 
-            Values: Array<AttributeValue | string | boolean> = [];
+            Values: Array<AttributeValue | string | boolean | Date> = [];
 
             serialize(): string {
                 var data: string =
@@ -1531,6 +1539,11 @@ module XrmTSToolkit {
                     else if (typeof value === "boolean") {
                         var boolValue = new BooleanValue(value);
                         data += "<f:anyType i:type=\"" + boolValue.GetValueType() + "\">" + boolValue.GetEncodedValue() + "</f:anyType>";
+                    }
+                    else if (value instanceof Date)
+                    {
+                        var dateValue = new DateValue(value);
+                        data += "<f:anyType i:type=\"" + dateValue.GetValueType() + "\">" + dateValue.GetEncodedValue() + "</f:anyType>";
                     }
                     else
                         data += "<f:anyType i:type=\"" + value.GetValueType() + "\">" + value.GetEncodedValue() + "</f:anyType>";
@@ -1784,6 +1797,8 @@ module XrmTSToolkit {
                         xml += new BooleanValue(parameter).Serialize();
                     else if (typeof parameter === "string")
                         xml += new StringValue(parameter).Serialize();
+                    else if (parameter instanceof Date)
+                        xml += new DateValue(parameter).Serialize();
                     else
                         xml += parameter.Serialize();
 
@@ -2547,144 +2562,144 @@ module XrmTSToolkit {
         export enum AssociatedMenuBehavior {
             // Summary:
             //     Use the collection name for the associated menu. Value = 0.
-          
+
             UseCollectionName = 0,
             //
             // Summary:
             //     Use the label for the associated menu. Value = 1.
-          
+
             UseLabel = 1,
             //
             // Summary:
             //     Do not show the associated menu. Value = 2.
-            
+
             DoNotDisplay = 2
         }
         export enum AssociatedMenuGroup {
             // Summary:
             //     Show the associated menu in the details group. Value = 0.
-            
+
             Details = 0,
             //
             // Summary:
             //     Show the associated menu in the sales group. Value = 1.
-           
+
             Sales = 1,
             //
             // Summary:
             //     Show the associated menu in the service group. Value = 2.
-            
+
             Service = 2,
             //
             // Summary:
             //     Show the associated menu in the marketing group. Value = 3.
-           
+
             Marketing = 3
         }
         export enum AttributeTypeCode {
             // Summary:
             //     A Boolean attribute. Value = 0.
-            
+
             Boolean = 0,
             //
             // Summary:
             //     An attribute that represents a customer. Value = 1.
-           
+
             Customer = 1,
             //
             // Summary:
             //     A date/time attribute. Value = 2.
-           
+
             DateTime = 2,
             //
             // Summary:
             //     A decimal attribute. Value = 3.
-           
+
             Decimal = 3,
             //
             // Summary:
             //     A double attribute. Value = 4.
-           
+
             Double = 4,
             //
             // Summary:
             //     An integer attribute. Value = 5.
-          
+
             Integer = 5,
             //
             // Summary:
             //     A lookup attribute. Value = 6.
-           
+
             Lookup = 6,
             //
             // Summary:
             //     A memo attribute. Value = 7.
-           
+
             Memo = 7,
             //
             // Summary:
             //     A money attribute. Value = 8.
-            
+
             Money = 8,
             //
             // Summary:
             //     An owner attribute. Value = 9.
-           
+
             Owner = 9,
             //
             // Summary:
             //     A partylist attribute. Value = 10.
-            
+
             PartyList = 10,
             //
             // Summary:
             //     A picklist attribute. Value = 11.
-            
+
             Picklist = 11,
             //
             // Summary:
             //     A state attribute. Value = 12.
-           
+
             State = 12,
             //
             // Summary:
             //     A status attribute. Value = 13.
-           
+
             Status = 13,
             //
             // Summary:
             //     A string attribute. Value = 14.
-           
+
             String = 14,
             //
             // Summary:
             //     An attribute that is an ID. Value = 15.
-           
+
             Uniqueidentifier = 15,
             //
             // Summary:
             //     An attribute that contains calendar rules. Value = 0x10.
-            
+
             CalendarRules = 16,
             //
             // Summary:
             //     An attribute that is created by the system at run time. Value = 0x11.
-           
+
             Virtual = 17,
             //
             // Summary:
             //     A big integer attribute. Value = 0x12.
-           
+
             BigInt = 18,
             //
             // Summary:
             //     A managed property attribute. Value = 0x13.
-           
+
             ManagedProperty = 19,
             //
             // Summary:
             //     An entity name attribute. Value = 20.
-           
+
             EntityName = 20
         }
         export enum CascadeType {
@@ -2694,7 +2709,7 @@ module XrmTSToolkit {
         export enum DateTimeFormat {
             // Summary:
             //     Display the date only. Value = 0.
-           
+
             DateOnly = 0,
             //
             // Summary:
@@ -2710,25 +2725,25 @@ module XrmTSToolkit {
             // Summary:
             //     Use this to retrieve only entity information. Equivalent to EntityFilters.Default.
             //     Value = 1.
-       
+
             Entity = 1,
             //
             // Summary:
             //     Use this to retrieve entity information plus attributes for the entity. Value
             //     = 2.
-       
+
             Attributes = 2,
             //
             // Summary:
             //     Use this to retrieve entity information plus privileges for the entity. Value
             //     = 4.
-        
+
             Privileges = 4,
             //
             // Summary:
             //     Use this to retrieve entity information plus entity relationships for the
             //     entity. Value = 8.
-       
+
             Relationships = 8,
             //
             // Summary:
@@ -2738,51 +2753,51 @@ module XrmTSToolkit {
         export enum ImeMode {
             // Summary:
             //     Specifies that the IME mode is chosen automatically. Value =0.
-           
+
             Auto = 0,
             //
             // Summary:
             //     Specifies that the IME mode is inactive. Value = 1.
-            
+
             Inactive = 1,
             //
             // Summary:
             //     Specifies that the IME mode is active. Value = 2.
-            
+
             Active = 2,
             //
             // Summary:
             //     Specifies that the IME mode is disabled. Value = 3.
-            
+
             Disabled = 3
         }
         export enum IntegerFormat {
             // Summary:
             //     Specifies to display an edit field for an integer. Value = 0.
-        
+
             None = 0,
             //
             // Summary:
             //     Specifies to display the integer as a drop down list of durations. Value
             //     = 1.
-          
+
             Duration = 1,
             //
             // Summary:
             //     Specifies to display the integer as a drop down list of time zones. Value
             //     = 2.
-            
+
             TimeZone = 2,
             //
             // Summary:
             //     Specifies the display the integer as a drop down list of installed languages.
             //     Value = 3.
-           
+
             Language = 3,
             //
             // Summary:
             //     Specifies a locale. Value = 4.
-           
+
             Locale = 4,
         }
         export enum OwnershipTypes {
@@ -2792,97 +2807,97 @@ module XrmTSToolkit {
             //
             // Summary:
             //     The entity is owned by a system user. Value = 1.
-           
+
             UserOwned = 1,
             //
             // Summary:
             //     The entity is owned by a team. internalValue = 2.
-          
+
             TeamOwned = 2,
             //
             // Summary:
             //     The entity is owned by a business unit. internal Value = 4.
-           
+
             BusinessOwned = 4,
             //
             // Summary:
             //     The entity is owned by an organization. Value = 8.
-           
+
             OrganizationOwned = 8,
             //
             // Summary:
             //     The entity is parented by a business unit. internal Value = 16.
-           
+
             BusinessParented = 16
         }
         export enum OptionSetType {
             // Summary:
             //     The option set provides a list of options. Value = 0.
-           
+
             Picklist = 0,
             //
             // Summary:
             //     The option set represents state options for a Microsoft.Xrm.Sdk.Metadata.StateAttributeMetadata
             //     attribute. Value = 1.
-           
+
             State = 1,
             //
             // Summary:
             //     The option set represents status options for a Microsoft.Xrm.Sdk.Metadata.StatusAttributeMetadata
             //     attribute. Value = 2.
-            
+
             Status = 2,
             //
             // Summary:
             //     The option set provides two options for a Microsoft.Xrm.Sdk.Metadata.BooleanAttributeMetadata
             //     attribute. Value = 3.
-           
+
             Boolean = 3,
         }
         export enum PrivilegeType {
             // Summary:
             //     Specifies no privilege. Value = 0.
-        
+
             None = 0,
             //
             // Summary:
             //     The create privilege. Value = 1.
-           
+
             Create = 1,
             //
             // Summary:
             //     The read privilege. Value = 2.
-          
+
             Read = 2,
             //
             // Summary:
             //     The write privilege. Value = 3.
-           
+
             Write = 3,
             //
             // Summary:
             //     The delete privilege. Value = 4.
-           
+
             Delete = 4,
             //
             // Summary:
             //     The assign privilege. Value = 5.
-           
+
             Assign = 5,
             //
             // Summary:
             //     The share privilege. Value = 6.
-           
+
             Share = 6,
             //
             // Summary:
             //     The append privilege. Value = 7.
-           
+
             Append = 7,
             //
             // Summary:
             //     The append to privilege. Value = 8.
-           
+
             AppendTo = 8
         }
         export enum RelationshipType {
@@ -2902,72 +2917,72 @@ module XrmTSToolkit {
             // Summary:
             //     No security privileges are checked during create or update operations. Value
             //     = 0.
-           
+
             None = 0,
             //
             // Summary:
             //     The Microsoft.Xrm.Sdk.Metadata.PrivilegeType.Append and Microsoft.Xrm.Sdk.Metadata.PrivilegeType.AppendTo
             //     privileges are checked for create or update operations. Value = 1.
-           
+
             Append = 1,
             //
             // Summary:
             //     Security for the referencing entity record is derived from the referenced
             //     entity record. Value = 2.
-           
+
             ParentChild = 2,
             //
             // Summary:
             //     Security for the referencing entity record is derived from a pointer record.
             //     Value = 4.
-           
+
             Pointer = 4,
             //
             // Summary:
             //     The referencing entity record inherits security from the referenced security
             //     record. Value = 8.
-           
+
             Inheritance = 8
         }
         export enum StringFormat {
             // Summary:
             //     Specifies to display the string as an e-mail. Value = 0.
-           
+
             Email = 0,
             //
             // Summary:
             //     Specifies to display the string as text. Value = 1.
-          
+
             Text = 1,
             //
             // Summary:
             //     Specifies to display the string as a text area. Value = 2.
-           
+
             TextArea = 2,
             //
             // Summary:
             //     Specifies to display the string as a URL. Value = 3.
-           
+
             Url = 3,
             //
             // Summary:
             //     Specifies to display the string as a ticker symbol. Value = 4.
-           
+
             TickerSymbol = 4,
             //
             // Summary:
             //     Specifies to display the string as a phonetic guide. Value = 5.
-            
+
             PhoneticGuide = 5,
             //
             // Summary:
             //     Specifies to display the string as a version number. Value = 6.
-           
+
             VersionNumber = 6,
             //
             // Summary:
             //     internal
-            
+
             Phone = 7
         }
     }

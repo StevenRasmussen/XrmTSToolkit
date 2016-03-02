@@ -30,6 +30,7 @@ function RunTests(): void {
         if (RunExtendedTests == true) {
             Tests.push(RetrieveMultipleTest_AllColumns);
             Tests.push(RetrieveMultipleTest_QueryExpressionWithFilters);
+            Tests.push(RetrieveMultipleTest_QueryExpressionWithFilters2);
             Tests.push(FetchTest);
         }
         Tests.push(SetStateTest_SetInactive);
@@ -302,7 +303,7 @@ function RetrieveMultipleTest_QueryExpressionWithFilters(PriorTestResult: TestRe
                 else {
                     TestEntityValues(data.RetrieveMultipleResult.Entities);
                 }
-                dfd.resolve(new TestResult(true, "Retrieve Multiple with filters test succeeded", PriorTestResult.ResultValue));
+                dfd.resolve(new TestResult(true, "Retrieve Multiple with filters test succeeded. Count = " + data.RetrieveMultipleResult.Entities.length.toString(), PriorTestResult.ResultValue));
             }
             catch (e) {
                 dfd.reject(new TestResult(false, "Retrieve Multiple with filters test succeeded but iterating over the properties failed: " + e, PriorTestResult.ResultValue));
@@ -310,6 +311,33 @@ function RetrieveMultipleTest_QueryExpressionWithFilters(PriorTestResult: TestRe
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
             dfd.reject(new TestResult(false, "Retrieve Multiple with filters test failed: " + result.faultstring, result));
+        });
+    }).promise();
+}
+
+function RetrieveMultipleTest_QueryExpressionWithFilters2(PriorTestResult: TestResult): JQueryPromise<TestResult> {
+    return $.Deferred<TestResult>(function (dfd) {
+        var Query = new XrmTSToolkit.Soap.Query.QueryExpression("account");
+        Query.Columns = new XrmTSToolkit.Soap.ColumnSet(true);
+        Query.Criteria = new XrmTSToolkit.Soap.Query.FilterExpression(XrmTSToolkit.Soap.Query.LogicalOperator.And);
+        Query.Criteria.AddCondition(new XrmTSToolkit.Soap.Query.ConditionExpression("createdon", XrmTSToolkit.Soap.Query.ConditionOperator.LessEqual, new Date()));
+        var Promise = XrmTSToolkit.Soap.RetrieveMultiple(Query);
+        Promise.done(function (data: XrmTSToolkit.Soap.RetrieveMultipleSoapResponse, result, xhr) {
+            try {
+                if (!data.RetrieveMultipleResult.Entities || data.RetrieveMultipleResult.Entities.length <= 0) {
+                    throw "No records were returned from the RetrieveMultipleTest_QueryExpressionWithFilters2 test.";
+                }
+                else {
+                    TestEntityValues(data.RetrieveMultipleResult.Entities);
+                }
+                dfd.resolve(new TestResult(true, "Retrieve Multiple with filters test 2 succeeded. Count = " + data.RetrieveMultipleResult.Entities.length.toString(), PriorTestResult.ResultValue));
+            }
+            catch (e) {
+                dfd.reject(new TestResult(false, "Retrieve Multiple with filters test 2 succeeded but iterating over the properties failed: " + e, PriorTestResult.ResultValue));
+            }
+        });
+        Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+            dfd.reject(new TestResult(false, "Retrieve Multiple with filters test 2 failed: " + result.faultstring, result));
         });
     }).promise();
 }
@@ -411,7 +439,6 @@ function TestEntityValues(Entities: Array<XrmTSToolkit.Soap.Entity>) {
                         break;
                     default:
                         throw "Please update the 'RetrieveMultipleTest' to handle the attribute type: " + XrmTSToolkit.Soap.AttributeType[value.Type].toString();
-                        break;
                 }
             }
             else if (typeof value === "string") { }
