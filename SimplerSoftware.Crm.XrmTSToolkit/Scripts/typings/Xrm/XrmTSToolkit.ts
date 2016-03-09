@@ -172,6 +172,8 @@ module XrmTSToolkit {
 
         /** "true" to retrieve all entities for RetrieveMultiple and Fetch operations, otherwise "false" */
         public static RetrieveAllEntities: boolean = false;
+        /** "true" to execute soap requests synchronously, otherwise "false" will execute asynchronously */
+        public static ExecuteRequestSynchronously: boolean  = false;
 
         /**
          * Creates a new record in CRM
@@ -572,6 +574,7 @@ module XrmTSToolkit {
 
             return $.Deferred<T>(function (dfd) {
                 var Request = $.ajax(XrmTSToolkit.Common.GetSoapServiceURL(), {
+                    async: !Soap.ExecuteRequestSynchronously,
                     data: xml,
                     type: "POST",
                     beforeSend: function (xhr: JQueryXHR) {
@@ -650,12 +653,12 @@ module XrmTSToolkit {
         export class SoapResponse {
             constructor(public ResponseXML: string) { }
             ParseResult(): void {
-                this.ParseResultInernal(this.ResponseXML);
+                this.ParseResultInternal(this.ResponseXML);
             }
             PropertyTypes = new PropertyTypeCollection();
 
-            protected ParseResultInernal(responseXML: string): void {
-                console.time("  ParseResultInernal");
+            protected ParseResultInternal(responseXML: string): void {
+                console.time("  ParseResultInternal");
                 var xmlDoc = $.parseXML(responseXML);
                 console.time("  Parse Main Element");
                 var mainElement = XML.ParseNode(xmlDoc.firstChild);
@@ -676,7 +679,7 @@ module XrmTSToolkit {
                     SoapResponse.ParseXRMBaseObject(parentObjects, xrmBaseObject);
                     console.timeEnd("  Parse Child XRM Object " + (i + 1));
                 });
-                console.timeEnd("  ParseResultInernal");
+                console.timeEnd("  ParseResultInternal");
             }
 
             static ParseXRMBaseObject(parentObjects: Array<any>, xrmBaseObject: XRMObject): XRMObject {
@@ -1839,7 +1842,7 @@ module XrmTSToolkit {
                 this.PropertyTypes["CreateResult"] = "s";
             }
             ParseResult(): void {
-                super.ParseResultInernal(this.ResponseXML);
+                super.ParseResultInternal(this.ResponseXML);
                 if ((<any>this).CreateResult) {
                     this.id = (<any>this).CreateResult;
                 }
