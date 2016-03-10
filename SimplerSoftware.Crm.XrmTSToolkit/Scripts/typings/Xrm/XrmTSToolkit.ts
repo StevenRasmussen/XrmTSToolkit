@@ -172,8 +172,6 @@ module XrmTSToolkit {
 
         /** "true" to retrieve all entities for RetrieveMultiple and Fetch operations, otherwise "false" */
         public static RetrieveAllEntities: boolean = false;
-        /** "true" to execute soap requests synchronously, otherwise "false" will execute asynchronously */
-        public static ExecuteRequestSynchronously: boolean  = false;
 
         /**
          * Creates a new record in CRM
@@ -578,7 +576,6 @@ module XrmTSToolkit {
 
             return $.Deferred<T>(function (dfd) {
                 var Request = $.ajax(XrmTSToolkit.Common.GetSoapServiceURL(), {
-                    async: !Soap.ExecuteRequestSynchronously,
                     data: xml,
                     type: "POST",
                     beforeSend: function (xhr: JQueryXHR) {
