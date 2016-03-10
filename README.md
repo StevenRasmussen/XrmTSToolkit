@@ -423,6 +423,13 @@ export class CustomActionRequest extends XrmTSToolkit.Soap.ExecuteRequest {
         this.Parameters["StringValue"] = stringValue;
         this.IsCustomAction = true;  //Set this in order to let XrmTSToolkit know How to serialize the request.
 	}
+    
+    /**
+     * This function is required only if a CustomActionResponse is needed to be returned, vs a standard ExecuteResponse
+     */
+    CreateResponse<T extends XrmTSToolkit.Soap.ExecuteResponse>(responseXml: string) {
+        return new CustomActionResponse(responseXml);
+    }
 }
 ```
 
