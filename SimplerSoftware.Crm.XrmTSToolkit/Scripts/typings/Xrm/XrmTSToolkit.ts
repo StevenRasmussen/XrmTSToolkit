@@ -183,7 +183,7 @@ module XrmTSToolkit {
         static Create(entity: Soap.Entity): JQueryPromise<Soap.CreateSoapResponse> {
             var requestBody = "<entity>" + entity.Serialize() + "</entity>";
             return $.Deferred<Soap.CreateSoapResponse>(function (dfd) {
-                var request = Soap.DoRequest<Soap.CreateSoapResponse>(requestBody, "Create");
+                var request = Soap.DoRequest<Soap.CreateSoapResponse>(requestBody, "Create", responseXml => new Soap.CreateSoapResponse(responseXml));
                 request.done(function (data, result, xhr) {
                     dfd.resolve(data);
                 });
@@ -203,7 +203,7 @@ module XrmTSToolkit {
         static Update(entity: Soap.Entity): JQueryPromise<Soap.UpdateSoapResponse> {
             var requestBody = "<entity>" + entity.Serialize() + "</entity>";
             return $.Deferred<Soap.UpdateSoapResponse>(function (dfd) {
-                var request = Soap.DoRequest<Soap.UpdateSoapResponse>(requestBody, "Update");
+                var request = Soap.DoRequest<Soap.UpdateSoapResponse>(requestBody, "Update", responseXml => new Soap.UpdateResponse(responseXml));
                 request.done(function (data, result, xhr) {
                     dfd.resolve(data);
                 });
@@ -243,7 +243,7 @@ module XrmTSToolkit {
             var xml = "<entityName>" + entityName + "</entityName>";
             xml += "<id>" + entityId + "</id>";
             return $.Deferred<Soap.DeleteSoapResponse>(function (dfd) {
-                var request = Soap.DoRequest<Soap.DeleteSoapResponse>(xml, "Delete");
+                var request = Soap.DoRequest<Soap.DeleteSoapResponse>(xml, "Delete", responseXml => new Soap.DeleteSoapResponse(responseXml));
                 request.done(function (data, result, xhr) {
                     dfd.resolve(data);
                 });
@@ -267,7 +267,7 @@ module XrmTSToolkit {
             if (!columnSet || columnSet == null) { columnSet = new Soap.ColumnSet(false); }
             var msgBody = "<entityName>" + entityLogicalName + "</entityName><id>" + id + "</id><columnSet>" + columnSet.Serialize() + "</columnSet>";
             return $.Deferred<Soap.RetrieveSoapResponse>(function (dfd) {
-                var request = Soap.DoRequest<Soap.RetrieveSoapResponse>(msgBody, "Retrieve");
+                var request = Soap.DoRequest<Soap.RetrieveSoapResponse>(msgBody, "Retrieve", responseXml => new Soap.RetrieveSoapResponse(responseXml));
                 request.done(function (data, result, xhr) {
                     dfd.resolve(data);
                 });
@@ -286,7 +286,7 @@ module XrmTSToolkit {
          */
         static RetrieveMultiple(query: Soap.Query.QueryExpression): JQueryPromise<Soap.RetrieveMultipleSoapResponse> {
             return $.Deferred<Soap.RetrieveMultipleSoapResponse>(function (dfd) {
-                var request = Soap.DoRequest<Soap.RetrieveMultipleSoapResponse>(query.serialize(), "RetrieveMultiple");
+                var request = Soap.DoRequest<Soap.RetrieveMultipleSoapResponse>(query.serialize(), "RetrieveMultiple", responseXml => new Soap.RetrieveMultipleSoapResponse(responseXml));
                 request.done(function (data, result, xhr) {
                     if (data.RetrieveMultipleResult.MoreRecords == true && Soap.RetrieveAllEntities == true) {
                         query.PageInfo.PagingCookie = Soap.Entity.EncodeValue(data.RetrieveMultipleResult.PagingCookie);
@@ -367,7 +367,7 @@ module XrmTSToolkit {
 
             var msgBody = "<query i:type='a:FetchExpression'><a:Query>" + fetchXml + "</a:Query></query>";
             return $.Deferred<Soap.RetrieveMultipleSoapResponse>(function (dfd) {
-                var request = Soap.DoRequest<Soap.RetrieveMultipleSoapResponse>(msgBody, "RetrieveMultiple");
+                var request = Soap.DoRequest<Soap.RetrieveMultipleSoapResponse>(msgBody, "RetrieveMultiple", responseXml => new Soap.RetrieveMultipleSoapResponse(responseXml));
                 request.done(function (data, result, xhr) {
                     if (data.RetrieveMultipleResult.MoreRecords == true && Soap.RetrieveAllEntities == true) {
                         var pagingCookie = xmlDoc.firstChild.attributes.getNamedItem("paging-cookie");
@@ -462,14 +462,18 @@ module XrmTSToolkit {
         static Execute<T extends Soap.ExecuteResponse>(executeRequest: Soap.ExecuteRequest): JQueryPromise<T>;
         static Execute<T extends Soap.ExecuteResponse>(execute: string | Soap.ExecuteRequest): JQueryPromise<T> {
             return $.Deferred<T>(function (dfd) {
-                var executeXML = "";
+                var executeXml = "";
+                var request: JQueryPromise<T>;
                 if (typeof execute === "string") {
-                    executeXML = execute;
+                    executeXml = execute;
+                    request = Soap.DoRequest<T>(executeXml, "Execute", responseXml => new Soap.ExecuteResponse(responseXml) as any);
                 }
                 else if (execute instanceof Soap.ExecuteRequest) {
-                    executeXML = execute.Serialize();
+                    executeXml = execute.Serialize();
+                    request = Soap.DoRequest<T>(executeXml, "Execute", <any>execute.CreateResponse);
+                } else {
+                    request = Soap.DoRequest<T>(executeXml, "Execute", responseXml => new Soap.ExecuteResponse(responseXml) as any);
                 }
-                var request = Soap.DoRequest<T>(executeXML, "Execute");
                 request.done(function (data, result, xhr) {
                     dfd.resolve(data);
                 });
@@ -558,7 +562,7 @@ module XrmTSToolkit {
                 });
             }).promise();
         }
-        private static DoRequest<T>(soapBody: string, requestType: string): JQueryPromise<T> {
+        private static DoRequest<T extends Soap.SoapResponse>(soapBody: string, requestType: string, createRequest: (responseXml: string) => T ): JQueryPromise<T> {
             var xml = "";
             if (requestType == "Execute") {
                 xml = "<s:Envelope xmlns:s = \"http://schemas.xmlsoap.org/soap/envelope/\">" +
@@ -583,28 +587,10 @@ module XrmTSToolkit {
                 Request.done(function (data: any, textStatus: string, xhr: JQueryXHR) {
                     var sr: Soap.SoapResponse = null;
                     var rt = xhr.responseText;
-                    switch (requestType) {
-                        case "Create":
-                            sr = new Soap.CreateSoapResponse(rt);
-                            break;
-                        case "Update":
-                            sr = new Soap.UpdateSoapResponse(rt);
-                            break;
-                        case "Delete":
-                            sr = new Soap.DeleteSoapResponse(rt);
-                            break;
-                        case "Retrieve":
-                            sr = new Soap.RetrieveSoapResponse(rt);
-                            break;
-                        case "RetrieveMultiple":
-                            sr = new Soap.RetrieveMultipleSoapResponse(rt);
-                            break;
-                        case "Execute":
-                            sr = new Soap.ExecuteResponse(rt);
-                            break;
-                        default:
-                            sr = new Soap.SoapResponse(rt);
-                            break;
+                    if (createRequest) {
+                        sr = createRequest(rt);
+                    } else {
+                        sr = new Soap.SoapResponse(rt);
                     }
                     sr.ParseResult();
                     dfd.resolve(<T><any>sr, textStatus, xhr);
@@ -648,14 +634,14 @@ module XrmTSToolkit {
             Serialize(): string;
         }
         export class SoapResponse {
-            constructor(public ResponseXML: string) { }
+            constructor(public ResponseXml: string) { }
             ParseResult(): void {
-                this.ParseResultInernal(this.ResponseXML);
+                this.ParseResultInternal(this.ResponseXml);
             }
             PropertyTypes = new PropertyTypeCollection();
 
-            protected ParseResultInernal(responseXML: string): void {
-                console.time("  ParseResultInernal");
+            protected ParseResultInternal(responseXML: string): void {
+                console.time("  ParseResultInternal");
                 var xmlDoc = $.parseXML(responseXML);
                 console.time("  Parse Main Element");
                 var mainElement = XML.ParseNode(xmlDoc.firstChild);
@@ -676,7 +662,7 @@ module XrmTSToolkit {
                     SoapResponse.ParseXRMBaseObject(parentObjects, xrmBaseObject);
                     console.timeEnd("  Parse Child XRM Object " + (i + 1));
                 });
-                console.timeEnd("  ParseResultInernal");
+                console.timeEnd("  ParseResultInternal");
             }
 
             static ParseXRMBaseObject(parentObjects: Array<any>, xrmBaseObject: XRMObject): XRMObject {
@@ -1778,6 +1764,13 @@ module XrmTSToolkit {
             ExecuteRequestType: string = "request";
             IncludeExecuteHeader: boolean = true;
             IsCustomAction: boolean = false;
+            /**
+             * Creates the Response Class.  For Custom Actions, should be overridden with the instantiation of the Cutom Action Response class.  Defaults to an Exeucte Response
+             * @param responseXml The Soap Response Xml
+             */
+            CreateResponse<T extends ExecuteResponse>(responseXml: string) {
+                return new ExecuteResponse(responseXml);
+            }
             Serialize(): string {
                 var xml = "";
                 if (this.IncludeExecuteHeader) { xml += "<Execute" + Soap.GetNameSpacesXML() + ">"; }
@@ -1831,6 +1824,10 @@ module XrmTSToolkit {
                 super("Create", "a:CreateRequest");
                 this.Parameters["Target"] = target;
             }
+
+            CreateResponse<T extends ExecuteResponse>(responseXml: string) {
+                return new CreateResponse(responseXml);
+            }
         }
         export class CreateResponse extends ExecuteResponse {
             constructor(responseXML: string) {
@@ -1839,7 +1836,7 @@ module XrmTSToolkit {
                 this.PropertyTypes["CreateResult"] = "s";
             }
             ParseResult(): void {
-                super.ParseResultInernal(this.ResponseXML);
+                super.ParseResultInternal(this.ResponseXml);
                 if ((<any>this).CreateResult) {
                     this.id = (<any>this).CreateResult;
                 }
@@ -1857,6 +1854,10 @@ module XrmTSToolkit {
                 super("Update", "a:UpdateRequest");
                 this.Parameters["Target"] = target;
             }
+
+            CreateResponse<T extends ExecuteResponse>(responseXml: string) {
+                return new UpdateResponse(responseXml);
+            }
         }
         export class UpdateResponse extends ExecuteResponse { }
         export class DeleteRequest extends ExecuteRequest {
@@ -1870,10 +1871,15 @@ module XrmTSToolkit {
                 super("Delete", "a:DeleteRequest");
                 this.Parameters["Target"] = target;
             }
+            CreateResponse<T extends ExecuteResponse>(responseXml: string) {
+                return new DeleteResponse(responseXml);
+            }
         }
         export class DeleteResponse extends ExecuteResponse { }
         export class RetrieveRequest extends ExecuteRequest {
-
+            CreateResponse<T extends ExecuteResponse>(responseXml: string) {
+                return new RetrieveResponse(responseXml);
+            }
         }
         export class RetrieveResponse extends ExecuteResponse {
 
@@ -1894,6 +1900,9 @@ module XrmTSToolkit {
                 this.Parameters["Moniker2"] = moniker2;
                 this.Parameters["RelationshipName"] = new Soap.StringValue(relationshipName);
             }
+            CreateResponse<T extends ExecuteResponse>(responseXml: string) {
+                return new AssociateResponse(responseXml);
+            }
         }
         export class AssociateResponse extends ExecuteResponse { }
         export class DisassociateRequest extends ExecuteRequest {
@@ -1910,6 +1919,9 @@ module XrmTSToolkit {
                 this.Parameters["Moniker1"] = moniker1;
                 this.Parameters["Moniker2"] = moniker2;
                 this.Parameters["RelationshipName"] = new Soap.StringValue(relationshipName);
+            }
+            CreateResponse<T extends ExecuteResponse>(responseXml: string) {
+                return new DisassociateResponse(responseXml);
             }
         }
         export class DisassociateResponse extends ExecuteResponse { }
@@ -1945,11 +1957,18 @@ module XrmTSToolkit {
                 this.Parameters["State"] = stateOptionSet;
                 this.Parameters["Status"] = statusOptionSet;
             }
+
+            CreateResponse<T extends ExecuteResponse>(responseXml: string) {
+                return new SetStateResponse(responseXml);
+            }
         }
         export class SetStateResponse extends ExecuteResponse { }
         export class WhoAmIRequest extends ExecuteRequest {
             constructor() {
                 super("WhoAmI");
+            }
+            CreateResponse<T extends ExecuteResponse>(responseXml: string) {
+                return new WhoAmIResponse(responseXml);
             }
         }
         export class WhoAmIResponse extends ExecuteResponse {
@@ -1975,6 +1994,10 @@ module XrmTSToolkit {
                 super("Assign");
                 this.Parameters["Assignee"] = assignee;
                 this.Parameters["Target"] = target;
+            }
+
+            CreateResponse<T extends ExecuteResponse>(responseXml: string) {
+                return new AssignResponse(responseXml);
             }
         }
         export class AssignResponse extends ExecuteResponse { }
@@ -2009,6 +2032,10 @@ module XrmTSToolkit {
                 xml += "<a:RequestName>ExecuteMultiple</a:RequestName>";
                 xml += "</request></Execute>";
                 return xml;
+            }
+
+            CreateResponse<T extends ExecuteResponse>(responseXml: string) {
+                return new ExecuteMultipleResponse(responseXml);
             }
         }
         export class ExecuteMultipleSettings {
@@ -2060,6 +2087,9 @@ module XrmTSToolkit {
                 this.Parameters["Target"] = target;
                 this.Parameters["PrincipalAccess"] = new PrincipalAccess(accessMask, principal);
             }
+            CreateResponse<T extends ExecuteResponse>(responseXml: string) {
+                return new GrantAccessResponse(responseXml);
+            }
         }
         export class GrantAccessResponse extends ExecuteResponse { }
         export class ModifyAccessRequest extends ExecuteRequest {
@@ -2075,6 +2105,9 @@ module XrmTSToolkit {
                 super("ModifyAccess");
                 this.Parameters["Target"] = target;
                 this.Parameters["PrincipalAccess"] = new PrincipalAccess(accessMask, principal);
+            }
+            CreateResponse<T extends ExecuteResponse>(responseXml: string) {
+                return new ModifyAccessResponse(responseXml);
             }
         }
         export class ModifyAccessResponse extends ExecuteResponse { }
@@ -2105,6 +2138,9 @@ module XrmTSToolkit {
                 super("RetrievePrincipalAccess");
                 this.Parameters["Target"] = target;
                 this.Parameters["Principal"] = principal;
+            }
+            CreateResponse<T extends ExecuteResponse>(responseXml: string) {
+                return new RetrievePrincipleAccessResponse(responseXml);
             }
         }
         export class RetrievePrincipleAccessResponse extends ExecuteResponse {
@@ -2142,6 +2178,10 @@ module XrmTSToolkit {
                 this.Parameters["MetadataId"] = new GuidValue("00000000-0000-0000-0000-000000000000");
                 this.Parameters["RetrieveAsIfPublished"] = new BooleanValue(true);
                 this.Parameters["LogicalName"] = new StringValue(logicalName);
+            }
+
+            CreateResponse<T extends ExecuteResponse>(responseXml: string) {
+                return new RetrieveEntityResponse(responseXml);
             }
         }
         export class RetrieveEntityResponse extends ExecuteResponse {
