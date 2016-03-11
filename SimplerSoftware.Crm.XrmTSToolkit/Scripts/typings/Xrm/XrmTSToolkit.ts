@@ -4,11 +4,11 @@
 /**
 * MSCRM 2011, 2013, 2015, 2016 Service Toolkit for TypeScript
 * @author Steven Rasmussen
-* @current version : 0.8.4
+* @current version : 0.8.5
 * Credits:
 *   The idea of this library was inspired by David Berry and Jaime Ji's XrmServiceToolkit.js
 *    
-* Date: March 2, 2016
+* Date: March 11, 2016
 * 
 * Required TypeScript Version: 1.8.6
 * 
@@ -76,6 +76,23 @@
 * Date: March 2, 2016
 *   Updated to TypeScript v1.8.6
 *   Added the ability to just use a 'Date' value instead of needing to create a 'DateValue' for both attributes and condition expressions.
+********************************************
+* Version : 0.8.5
+* Date: March 11, 2016
+*   Breaking changes:
+*      Due to some internal changes the way to create a custom action has been changed. See updated documentation on how to implement a custom action.
+*      You can no longer pass a string value to the 'Soap.Execute' method. To execute a raw soap message please encapsulate the xml in a RawExecuteRequest object. See updated docs for an example.
+*
+*   Added 'errorMessage' property to 'FaultResponse' to make it easier to get error messages from the response.
+*   Added the ability to execute the requests synchronously.  There is now an optional parameter called 'sync' that is defaulted to 'false'.
+*   Defaulted the 'Criteria' on a query expression to contain a value instead of 'null'
+*   Added the 'Distinct' property to a query expression
+*   Added the 'CustomActionRequest' class to simplify creating custom actions
+*   Added SoapRequest base class and made all requests inherit from it
+*   Refactor of DoRequest method to take into account new SoapRequest base class
+*   Remove unnecessary code from methods on Soap class.
+*   Introduced the 'Entity.getAttribute' method to facilitate casting to a particular value type
+*   Introduced the 'getBool', 'getString', 'getDate', 'getNumber' methods on the entity class to facilitate getting an attribute value.
 */
 
 module XrmTSToolkit {
@@ -168,6 +185,15 @@ module XrmTSToolkit {
         //    });
         //};
     }
+    export module XML {
+        export class XMLElement {
+            Name: string;
+            Text: string;
+            TypeName: string;
+            Children: Array<XMLElement> = new Array<XMLElement>();
+            Parent: XMLElement;
+        }
+    }
     export class Soap {
 
         /** "true" to retrieve all entities for RetrieveMultiple and Fetch operations, otherwise "false" */
@@ -177,40 +203,26 @@ module XrmTSToolkit {
          * Creates a new record in CRM
          *
          * @param   {Soap.Entity}   entity  The Soap.Entity to create in CRM.
+         * @param   {boolean}   sync    Set to 'true' to execute the request synchronously.
          *
          * @return  A JQueryPromise&lt;Soap.CreateSoapResponse&gt;
          */
-        static Create(entity: Soap.Entity): JQueryPromise<Soap.CreateSoapResponse> {
-            var requestBody = "<entity>" + entity.Serialize() + "</entity>";
-            return $.Deferred<Soap.CreateSoapResponse>(function (dfd) {
-                var request = Soap.DoRequest<Soap.CreateSoapResponse>(requestBody, "Create");
-                request.done(function (data, result, xhr) {
-                    dfd.resolve(data);
-                });
-                request.fail(function (result) {
-                    dfd.reject(result);
-                });
-            }).promise();
+        static Create(entity: Soap.Entity, sync: boolean = false): JQueryPromise<Soap.CreateSoapResponse> {
+            var request = new Soap.CreateSoapRequest(entity);
+            return Soap.DoRequest<Soap.CreateSoapResponse>(request, sync);
         }
 
         /**
          * Updates the given Entity in CRM.
          *
-         * @param   {Soap.Entity}   entity  The Soap.Entity to update in CRM..
+         * @param   {Soap.Entity}   entity  The Soap.Entity to update in CRM.
+         * @param   {boolean}   sync  Set to 'true' to execute the request synchronously.
          *
          * @return  A JQueryPromise&lt;Soap.UpdateSoapResponse&gt;
          */
-        static Update(entity: Soap.Entity): JQueryPromise<Soap.UpdateSoapResponse> {
-            var requestBody = "<entity>" + entity.Serialize() + "</entity>";
-            return $.Deferred<Soap.UpdateSoapResponse>(function (dfd) {
-                var request = Soap.DoRequest<Soap.UpdateSoapResponse>(requestBody, "Update");
-                request.done(function (data, result, xhr) {
-                    dfd.resolve(data);
-                });
-                request.fail(function (result) {
-                    dfd.reject(result);
-                });
-            }).promise();
+        static Update(entity: Soap.Entity, sync: boolean = false): JQueryPromise<Soap.UpdateSoapResponse> {
+            var request = new Soap.UpdateSoapRequest(entity);
+            return Soap.DoRequest<Soap.UpdateSoapResponse>(request, sync);
         }
 
         /**
@@ -227,23 +239,21 @@ module XrmTSToolkit {
          *
          * @param   {string}    entityName  Logical name of the entity to be deleted.
          * @param   {string}    entityId    GUID of the entity to be deleted.
+         * @param   {boolean}   sync  Set to 'true' to execute the request synchronously.
          *
-         * @return  A JQueryPromise&lt;Soap.DeleteSoapResponse&gt;
+         * @return  A JQueryPromise<Soap.DeleteSoapResponse>;
          */
         static Delete(entityName: string, entityId: string): JQueryPromise<Soap.DeleteSoapResponse>;
-        static Delete(entity: string | Soap.EntityReference, entityId?: string): JQueryPromise<Soap.DeleteSoapResponse> {
-            var entityName = "";
-            if (typeof entity === "string") {
-                entityName = entityName;
-            }
-            else if (entity instanceof Soap.EntityReference) {
-                entityName = entity.LogicalName;
-                entityId = entity.Id;
-            }
-            var xml = "<entityName>" + entityName + "</entityName>";
-            xml += "<id>" + entityId + "</id>";
+        static Delete(entity: string | Soap.EntityReference, entityId?: string, sync: boolean = false): JQueryPromise<Soap.DeleteSoapResponse> {
+            var entityRef: Soap.EntityReference;
+            if (typeof entity === "string")
+                entityRef = new Soap.EntityReference(entityId, entity);
+            else if (entity instanceof Soap.EntityReference)
+                entityRef = entity;
+
+            var soapRequest = new Soap.DeleteSoapRequest(entityRef);
             return $.Deferred<Soap.DeleteSoapResponse>(function (dfd) {
-                var request = Soap.DoRequest<Soap.DeleteSoapResponse>(xml, "Delete");
+                var request = Soap.DoRequest<Soap.DeleteSoapResponse>(soapRequest, sync);
                 request.done(function (data, result, xhr) {
                     dfd.resolve(data);
                 });
@@ -259,34 +269,27 @@ module XrmTSToolkit {
          * @param   {string}    id                  The GUID of the entity to retrieve.
          * @param   {string}    entityLogicalName   Entity logical name.
          * @param   {Soap.ColumnSet}    columnSet   Columns to retrieve as part of the entity.
+         * @param   {boolean}   sync    Set to 'true' to execute the request synchronously.
          *
          * @return  A JQueryPromise&lt;Soap.RetrieveSoapResponse&gt;
          */
-        static Retrieve(id: string, entityLogicalName: string, columnSet?: Soap.ColumnSet): JQueryPromise<Soap.RetrieveSoapResponse> {
-            id = Common.StripGUID(id);
-            if (!columnSet || columnSet == null) { columnSet = new Soap.ColumnSet(false); }
-            var msgBody = "<entityName>" + entityLogicalName + "</entityName><id>" + id + "</id><columnSet>" + columnSet.Serialize() + "</columnSet>";
-            return $.Deferred<Soap.RetrieveSoapResponse>(function (dfd) {
-                var request = Soap.DoRequest<Soap.RetrieveSoapResponse>(msgBody, "Retrieve");
-                request.done(function (data, result, xhr) {
-                    dfd.resolve(data);
-                });
-                request.fail(function (result) {
-                    dfd.reject(result);
-                });
-            }).promise();
+        static Retrieve(id: string, entityLogicalName: string, columns?: Soap.ColumnSet, sync: boolean = false): JQueryPromise<Soap.RetrieveSoapResponse> {
+            var request = new Soap.RetrieveSoapRequest(new Soap.EntityReference(id, entityLogicalName), columns);
+            return Soap.DoRequest<Soap.RetrieveSoapResponse>(request, sync);
         }
 
         /**
          * Retrieves records from CRM that match the provided criteria.
          *
          * @param   {Soap.Query.QueryExpression}    query   The query specifying the criteria and other parameters.
+         * @param   {boolean}   sync    Set to 'true' to execute the request synchronously.
          *
          * @return  A JQueryPromise&lt;Soap.RetrieveMultipleSoapResponse&gt;
          */
-        static RetrieveMultiple(query: Soap.Query.QueryExpression): JQueryPromise<Soap.RetrieveMultipleSoapResponse> {
+        static RetrieveMultiple(query: Soap.Query.QueryExpression, sync: boolean = false): JQueryPromise<Soap.RetrieveMultipleSoapResponse> {
             return $.Deferred<Soap.RetrieveMultipleSoapResponse>(function (dfd) {
-                var request = Soap.DoRequest<Soap.RetrieveMultipleSoapResponse>(query.serialize(), "RetrieveMultiple");
+                var soapRequest = new Soap.RetrieveMultipleSoapRequest(query);
+                var request = Soap.DoRequest<Soap.RetrieveMultipleSoapResponse>(soapRequest, sync);
                 request.done(function (data, result, xhr) {
                     if (data.RetrieveMultipleResult.MoreRecords == true && Soap.RetrieveAllEntities == true) {
                         query.PageInfo.PagingCookie = Soap.Entity.EncodeValue(data.RetrieveMultipleResult.PagingCookie);
@@ -321,6 +324,7 @@ module XrmTSToolkit {
          * @param   {string}    intermediateTableName                       Name of the intermediate table of the N:N relationship.
          * @param   {Soap.ColumnSet}    optional columns                    The columns to be retrieved on the returned records.
          * @param   {Array{Soap.Query.OrderExpression}} optional sortOrders Sort order of the returned records.
+         * @param   {boolean}   sync    Set to 'true' to execute the request synchronously.
          *
          * @return  A JQueryPromise&lt;Soap.RetrieveMultipleSoapResponse&gt;
          */
@@ -330,7 +334,9 @@ module XrmTSToolkit {
             linkToEntityName: string,
             intermediateTableName: string,
             columns: Soap.ColumnSet = new Soap.ColumnSet(false),
-            sortOrders: Array<Soap.Query.OrderExpression> = []): JQueryPromise<Soap.RetrieveMultipleSoapResponse> {
+            sortOrders: Array<Soap.Query.OrderExpression> = [],
+            sync: boolean = false
+        ): JQueryPromise<Soap.RetrieveMultipleSoapResponse> {
 
             var condition = new Soap.Query.ConditionExpression(linkFromEntityName + "id", Soap.Query.ConditionOperator.Equal, new Soap.GuidValue(linkFromEntityId));
             var linkEntity1 = new Soap.Query.LinkEntity(linkToEntityName, intermediateTableName, linkToEntityName + "id", linkToEntityName + "id", Soap.Query.JoinOperator.Inner);
@@ -347,27 +353,22 @@ module XrmTSToolkit {
             query.LinkEntities.push(linkEntity1);
             query.Orders = sortOrders;
 
-            return Soap.RetrieveMultiple(query);
+            return Soap.RetrieveMultiple(query, sync);
         }
 
         /**
          * Performs a 'Fetch' operation, similar to a 'RetrieveMultiple' but using FetchXML as the query string.
          *
          * @param   {string}    fetchXml    The FetchXML query.
+         * @param   {boolean}   sync    Set to 'true' to execute the request synchronously.
          *
          * @return  A JQueryPromise&lt;Soap.RetrieveMultipleSoapResponse&gt;
          */
-        static Fetch(fetchXml: string): JQueryPromise<Soap.RetrieveMultipleSoapResponse> {
+        static Fetch(fetchXml: string, sync: boolean = false): JQueryPromise<Soap.RetrieveMultipleSoapResponse> {
             var xmlDoc = $.parseXML(fetchXml);
-            //First decode all invalid characters
-            fetchXml = Soap.DecodeFetchXML(fetchXml);
-
-            //now re-encode all invalid characters
-            fetchXml = Soap.EncodeFetchXML(fetchXml);
-
-            var msgBody = "<query i:type='a:FetchExpression'><a:Query>" + fetchXml + "</a:Query></query>";
+            var soapRequest = new Soap.FetchSoapRequest(fetchXml);
             return $.Deferred<Soap.RetrieveMultipleSoapResponse>(function (dfd) {
-                var request = Soap.DoRequest<Soap.RetrieveMultipleSoapResponse>(msgBody, "RetrieveMultiple");
+                var request = Soap.DoRequest<Soap.RetrieveMultipleSoapResponse>(soapRequest, sync);
                 request.done(function (data, result, xhr) {
                     if (data.RetrieveMultipleResult.MoreRecords == true && Soap.RetrieveAllEntities == true) {
                         var pagingCookie = xmlDoc.firstChild.attributes.getNamedItem("paging-cookie");
@@ -389,7 +390,7 @@ module XrmTSToolkit {
                         currentPageNumber += 1;
                         pageNumber.value = currentPageNumber.toString();
                         xmlDoc.firstChild.attributes.setNamedItem(pageNumber);
-                        var additionalRequest = Soap.Fetch(Soap.XMLtoString(xmlDoc));
+                        var additionalRequest = Soap.Fetch(Soap.XMLtoString(xmlDoc), sync);
                         additionalRequest.done(function (data1, result, xhr) {
                             $.each(data1.RetrieveMultipleResult.Entities, function (i, Entity) {
                                 data.RetrieveMultipleResult.Entities.push(Entity);
@@ -410,22 +411,6 @@ module XrmTSToolkit {
             }).promise();
         }
 
-        private static DecodeFetchXML(fetchXML: string): string {
-            fetchXML = fetchXML.replace(/&amp;/g, "&");
-            fetchXML = fetchXML.replace(/&lt;/g, "<");
-            fetchXML = fetchXML.replace(/&gt;/g, ">");
-            fetchXML = fetchXML.replace(/&apos;/g, "'");
-            fetchXML = fetchXML.replace(/&quot;/g, "\"");
-            return fetchXML;
-        }
-        private static EncodeFetchXML(fetchXML: string): string {
-            fetchXML = fetchXML.replace(/&/g, "&amp;");
-            fetchXML = fetchXML.replace(/</g, "&lt;");
-            fetchXML = fetchXML.replace(/>/g, "&gt;");
-            fetchXML = fetchXML.replace(/'/g, "&apos;");
-            fetchXML = fetchXML.replace(/\"/g, "&quot;");
-            return fetchXML;
-        }
         private static XMLtoString(elem) {
             var serialized;
             try {
@@ -441,42 +426,16 @@ module XrmTSToolkit {
         }
 
         /**
-         * Performs an 'Execute' request.
-         *
-         * @tparam  T   Type of the soap response to be returned.
-         * @param   {string}    executeXML  contents of the '&lt;Execute&gt;' tags,  INCLUDING the '&lt;
-         *                                  Execute&gt;' tags.
-         *
-         * @return  A JQueryPromise&lt;T&gt;
-         */
-        static Execute<T>(executeXML: string): JQueryPromise<T>;
-
-        /**
          * Executes the specified request.
          *
          * @tparam  T   Type of the soap response to be returned.
          * @param   {Soap.ExecuteRequest}   executeRequest  The request to execute.
+         * @param   {boolean}   sync    Set to 'true' to execute the request synchronously.
          *
          * @return  A JQueryPromise&lt;T&gt;
          */
-        static Execute<T extends Soap.ExecuteResponse>(executeRequest: Soap.ExecuteRequest): JQueryPromise<T>;
-        static Execute<T extends Soap.ExecuteResponse>(execute: string | Soap.ExecuteRequest): JQueryPromise<T> {
-            return $.Deferred<T>(function (dfd) {
-                var executeXML = "";
-                if (typeof execute === "string") {
-                    executeXML = execute;
-                }
-                else if (execute instanceof Soap.ExecuteRequest) {
-                    executeXML = execute.Serialize();
-                }
-                var request = Soap.DoRequest<T>(executeXML, "Execute");
-                request.done(function (data, result, xhr) {
-                    dfd.resolve(data);
-                });
-                request.fail(function (result) {
-                    dfd.reject(result);
-                });
-            }).promise();
+        static Execute<T extends Soap.ExecuteResponse>(executeRequest: Soap.ExecuteRequest, sync: boolean = false): JQueryPromise<T> {
+            return Soap.DoRequest<T>(executeRequest, sync);
         }
 
         /**
@@ -485,20 +444,13 @@ module XrmTSToolkit {
          * @param   {Soap.EntityReference}  moniker1    The EntityReference of the first entity.
          * @param   {Soap.EntityReference}  moniker2    The EntityReference of the second entity.
          * @param   {string}    relationshipName        Name of the N:N relationship (lowercase).
+         * @param   {boolean}   sync    Set to 'true' to execute the request synchronously.
          *
          * @return  A JQueryPromise&lt;Soap.SoapResponse&gt;
          */
-        static Associate(moniker1: Soap.EntityReference, moniker2: Soap.EntityReference, relationshipName: string): JQueryPromise<Soap.SoapResponse> {
-            var AssociateRequest = new Soap.AssociateRequest(moniker1, moniker2, relationshipName);
-            return $.Deferred<Soap.ExecuteResponse>(function (dfd) {
-                var request = Soap.Execute<Soap.ExecuteResponse>(AssociateRequest);
-                request.done(function (data, result, xhr) {
-                    dfd.resolve(data);
-                });
-                request.fail(function (result) {
-                    dfd.reject(result);
-                });
-            }).promise();
+        static Associate(moniker1: Soap.EntityReference, moniker2: Soap.EntityReference, relationshipName: string, sync: boolean = false): JQueryPromise<Soap.SoapResponse> {
+            var request = new Soap.AssociateRequest(moniker1, moniker2, relationshipName);
+            return Soap.Execute<Soap.ExecuteResponse>(request, sync);
         }
 
         /**
@@ -507,20 +459,13 @@ module XrmTSToolkit {
          * @param   {Soap.EntityReference}  moniker1    The EntityReference of the first entity.
          * @param   {Soap.EntityReference}  moniker2    The EntityReference of the second entity.
          * @param   {string}    relationshipName        Name of the N:N relationship (lowercase).
+         * @param   {boolean}   sync    Set to 'true' to execute the request synchronously.
          *
          * @return  A JQueryPromise&lt;Soap.SoapResponse&gt;
          */
-        static Disassociate(moniker1: Soap.EntityReference, moniker2: Soap.EntityReference, relationshipName: string): JQueryPromise<Soap.SoapResponse> {
-            var DisassociateRequest = new Soap.DisassociateRequest(moniker1, moniker2, relationshipName);
-            return $.Deferred<Soap.ExecuteResponse>(function (dfd) {
-                var request = Soap.Execute<Soap.ExecuteResponse>(DisassociateRequest);
-                request.done(function (data, result, xhr) {
-                    dfd.resolve(data);
-                });
-                request.fail(function (result) {
-                    dfd.reject(result);
-                });
-            }).promise();
+        static Disassociate(moniker1: Soap.EntityReference, moniker2: Soap.EntityReference, relationshipName: string, sync: boolean = false): JQueryPromise<Soap.SoapResponse> {
+            var request = new Soap.DisassociateRequest(moniker1, moniker2, relationshipName);
+            return Soap.Execute<Soap.ExecuteResponse>(request, sync);
         }
 
         /**
@@ -529,10 +474,11 @@ module XrmTSToolkit {
          * @param   {Soap.EntityReference}  entityMoniker   The EntityReference of the record.
          * @param   {number}    state                       The state (statecode).
          * @param   {number}    status                      The status (statuscode).
+         * @param   {boolean}   sync    Set to 'true' to execute the request synchronously.
          *
          * @return  A JQueryPromise&lt;Soap.SoapResponse&gt;
          */
-        static SetState(entityMoniker: Soap.EntityReference, state: number, status: number): JQueryPromise<Soap.SoapResponse>;
+        static SetState(entityMoniker: Soap.EntityReference, state: number, status: number, sync?: boolean): JQueryPromise<Soap.SoapResponse>;
 
         /**
          * Sets a state.
@@ -540,77 +486,39 @@ module XrmTSToolkit {
          * @param   {Soap.EntityReference}  entityMoniker   The EntityReference of the record.
          * @param   {Soap.OptionSetValue}   state           The state (statecode).
          * @param   {Soap.OptionSetValue}   status          The status (statuscode).
+         * @param   {boolean}   sync    Set to 'true' to execute the request synchronously.
          *
          * @return  A JQueryPromise&lt;Soap.SoapResponse&gt;
          */
-        static SetState(entityMoniker: Soap.EntityReference, state: Soap.OptionSetValue, status: Soap.OptionSetValue): JQueryPromise<Soap.SoapResponse>;
-        static SetState(entityMoniker: Soap.EntityReference, state: number | Soap.OptionSetValue, status: number | Soap.OptionSetValue): JQueryPromise<Soap.SoapResponse> {
+        static SetState(entityMoniker: Soap.EntityReference, state: Soap.OptionSetValue, status: Soap.OptionSetValue, sync?: boolean): JQueryPromise<Soap.SoapResponse>;
+        static SetState(entityMoniker: Soap.EntityReference, state: number | Soap.OptionSetValue, status: number | Soap.OptionSetValue, sync: boolean = false): JQueryPromise<Soap.SoapResponse> {
             var setStateRequest: Soap.SetStateRequest;
             if (typeof state === "number" && typeof status === "number") { setStateRequest = new Soap.SetStateRequest(entityMoniker, state, status); }
             else { setStateRequest = new Soap.SetStateRequest(entityMoniker, <Soap.OptionSetValue>state, <Soap.OptionSetValue>status); }
-            return $.Deferred<Soap.ExecuteResponse>(function (dfd) {
-                var request = Soap.Execute<Soap.ExecuteResponse>(setStateRequest);
-                request.done(function (data, result, xhr) {
-                    dfd.resolve(data);
-                });
-                request.fail(function (result) {
-                    dfd.reject(result);
-                });
-            }).promise();
+            return Soap.Execute<Soap.ExecuteResponse>(setStateRequest, sync);
         }
-        private static DoRequest<T>(soapBody: string, requestType: string): JQueryPromise<T> {
-            var xml = "";
-            if (requestType == "Execute") {
-                xml = "<s:Envelope xmlns:s = \"http://schemas.xmlsoap.org/soap/envelope/\">" +
-                    "<s:Body>" + soapBody + "</s:Body></s:Envelope>";
-            }
-            else {
-                soapBody = "<" + requestType + ">" + soapBody + "</" + requestType + ">";
-                //Add in all the different namespaces
-                xml = "<s:Envelope" + Soap.GetNameSpacesXML() + "><s:Body>" + soapBody + "</s:Body></s:Envelope>";
-            }
+        private static DoRequest<T>(soapRequest: Soap.SoapRequest<Soap.SoapResponse>, sync: boolean): JQueryPromise<T> {
+            var soapBody = soapRequest.Serialize();
+            var xml = "<s:Envelope" + Soap.GetNameSpacesXML() + "><s:Body>" + soapBody + "</s:Body></s:Envelope>";
 
             return $.Deferred<T>(function (dfd) {
-                var Request = $.ajax(XrmTSToolkit.Common.GetSoapServiceURL(), {
+                var request = $.ajax(XrmTSToolkit.Common.GetSoapServiceURL(), {
+                    async: !sync,
                     data: xml,
                     type: "POST",
                     beforeSend: function (xhr: JQueryXHR) {
                         xhr.setRequestHeader("Accept", "application/xml, text/xml, */*");
                         xhr.setRequestHeader("Content-Type", "text/xml; charset=utf-8");
-                        xhr.setRequestHeader("SOAPAction", "http://schemas.microsoft.com/xrm/2011/Contracts/Services/IOrganizationService/" + requestType);
+                        xhr.setRequestHeader("SOAPAction", "http://schemas.microsoft.com/xrm/2011/Contracts/Services/IOrganizationService/" + soapRequest.SoapAction);
                     }
                 });
-                Request.done(function (data: any, textStatus: string, xhr: JQueryXHR) {
-                    var sr: Soap.SoapResponse = null;
+                request.done(function (data: any, textStatus: string, xhr: JQueryXHR) {
                     var rt = xhr.responseText;
-                    switch (requestType) {
-                        case "Create":
-                            sr = new Soap.CreateSoapResponse(rt);
-                            break;
-                        case "Update":
-                            sr = new Soap.UpdateSoapResponse(rt);
-                            break;
-                        case "Delete":
-                            sr = new Soap.DeleteSoapResponse(rt);
-                            break;
-                        case "Retrieve":
-                            sr = new Soap.RetrieveSoapResponse(rt);
-                            break;
-                        case "RetrieveMultiple":
-                            sr = new Soap.RetrieveMultipleSoapResponse(rt);
-                            break;
-                        case "Execute":
-                            sr = new Soap.ExecuteResponse(rt);
-                            break;
-                        default:
-                            sr = new Soap.SoapResponse(rt);
-                            break;
-                    }
+                    var sr: Soap.SoapResponse = soapRequest.CreateResponse(rt);
                     sr.ParseResult();
                     dfd.resolve(<T><any>sr, textStatus, xhr);
                 });
-                Request.fail(function (xhr: JQueryXHR, textStatus: string, exception) {
-                    var errorText = typeof exception === "undefined" ? textStatus : exception;
+                request.fail(function (xhr: JQueryXHR, textStatus: string, exception) {
                     var fault = new Soap.FaultResponse(xhr.responseText);
                     fault.ParseResult();
                     dfd.reject(fault);
@@ -647,16 +555,23 @@ module XrmTSToolkit {
         export interface ISerializable {
             Serialize(): string;
         }
+        export abstract class SoapRequest<T extends SoapResponse> implements ISerializable {
+            constructor(public SoapAction: string, private type: { new (responseXml: string): T; }) { }
+            abstract Serialize(): string;
+            public CreateResponse(responseXml: string): T {
+                return new this.type(responseXml);
+            }
+        }
         export class SoapResponse {
-            constructor(public ResponseXML: string) { }
+            constructor(public ResponseXml: string) { }
             ParseResult(): void {
-                this.ParseResultInernal(this.ResponseXML);
+                this.ParseResultInternal(this.ResponseXml);
             }
             PropertyTypes = new PropertyTypeCollection();
 
-            protected ParseResultInernal(responseXML: string): void {
-                console.time("  ParseResultInernal");
-                var xmlDoc = $.parseXML(responseXML);
+            protected ParseResultInternal(responseXml: string): void {
+                console.time("  ParseResultInternal");
+                var xmlDoc = $.parseXML(responseXml);
                 console.time("  Parse Main Element");
                 var mainElement = XML.ParseNode(xmlDoc.firstChild);
                 console.timeEnd("  Parse Main Element");
@@ -741,7 +656,7 @@ module XrmTSToolkit {
                     if (currentPropertyType == "s") {
                         currentObject = xrmBaseObject.Value;
                     } else if (currentPropertyType == "b") {
-                        currentObject = xrmBaseObject.Value == "true" ? true : false;
+                        currentObject = xrmBaseObject.Value == "true" || xrmBaseObject.Value == "True" ? true : false;
                     } else if (currentPropertyType == "n") {
                         currentObject = parseFloat(xrmBaseObject.Value);
                     } else if (currentPropertyType == "f") {
@@ -764,7 +679,7 @@ module XrmTSToolkit {
                         currentObject = new Soap.AliasedValue();
                     }
                     else if (currentPropertyType == "boolean") {
-                        currentObject = new Soap.BooleanValue(xrmBaseObject.Value == "false" ? false : true);
+                        currentObject = new Soap.BooleanValue(xrmBaseObject.Value == "true" || xrmBaseObject.Value == "True" ? true : false);
                     }
                     else if (currentPropertyType == "double") {
                         currentObject = new Soap.DoubleValue(parseFloat(xrmBaseObject.Value));
@@ -842,9 +757,8 @@ module XrmTSToolkit {
                         currentObject = new window[ObjectType]();
                     }
                     catch (e2) {
-                        if (!currentObject) {
+                        if (!currentObject)
                             currentObject = {};
-                        }
                     }
                 }
                 return currentObject;
@@ -873,6 +787,104 @@ module XrmTSToolkit {
                     if (item[elementName] == name)
                         return item;
                 }
+            }
+        }
+        export class CreateSoapRequest extends SoapRequest<CreateSoapResponse> {
+            constructor(public Entity: Soap.Entity) {
+                super("Create", CreateSoapResponse);
+            }
+            Serialize(): string {
+                return "<Create><entity>" + this.Entity.Serialize() + "</entity></Create>";
+            }
+        }
+        export class CreateSoapResponse extends SoapResponse {
+            constructor(responseXml: string) {
+                super(responseXml);
+                this.PropertyTypes["CreateResult"] = "s";
+            }
+            /** The GUID of the newly created record. */
+            CreateResult: string;
+        }
+        export class UpdateSoapRequest extends SoapRequest<UpdateSoapResponse> {
+            constructor(public Entity: Soap.Entity) {
+                super("Update", UpdateSoapResponse);
+            }
+            Serialize(): string {
+                return "<Update><entity>" + this.Entity.Serialize() + "</entity></Update>";
+            }
+        }
+        export class UpdateSoapResponse extends SoapResponse { }
+        export class DeleteSoapRequest extends SoapRequest<DeleteSoapResponse>
+        {
+            constructor(public entity: Soap.EntityReference) {
+                super("Delete", DeleteSoapResponse);
+            }
+            Serialize(): string {
+                var xml = "<Delete><entityName>" + this.entity.entityType + "</entityName>";
+                xml += "<id>" + this.entity.id + "</id></Delete>";
+                return xml;
+            }
+        }
+        export class DeleteSoapResponse extends SoapResponse { }
+        export class RetrieveSoapRequest extends SoapRequest<RetrieveSoapResponse>{
+            constructor(public Entity: Soap.EntityReference, public Columns?: Soap.ColumnSet) {
+                super("Retrieve", RetrieveSoapResponse);
+            }
+            Serialize(): string {
+                var id = Common.StripGUID(this.Entity.id);
+                if (!this.Columns || this.Columns == null) { this.Columns = new Soap.ColumnSet(false); }
+                return "<Retrieve><entityName>" + this.Entity.entityType + "</entityName><id>" + id + "</id><columnSet>" + this.Columns.Serialize() + "</columnSet></Retrieve>";
+            }
+        }
+        export class RetrieveSoapResponse extends SoapResponse {
+            constructor(responseXml: string) {
+                super(responseXml);
+                this.PropertyTypes["RetrieveResult"] = "Entity";
+            }
+            /** The retrieved Soap.Entity */
+            RetrieveResult: Entity;
+        }
+        export class RetrieveMultipleSoapRequest extends SoapRequest<RetrieveMultipleSoapResponse>
+        {
+            constructor(public Query: Soap.Query.QueryExpression) {
+                super("RetrieveMultiple", RetrieveMultipleSoapResponse);
+            }
+            Serialize(): string {
+                return "<RetrieveMultiple>" + this.Query.serialize() + "</RetrieveMultiple>";
+            }
+        }
+        export class RetrieveMultipleSoapResponse extends SoapResponse {
+            RetrieveMultipleResult: RetrieveMultipleResult;
+        }
+        export class FetchSoapRequest extends SoapRequest<RetrieveMultipleSoapResponse>
+        {
+            constructor(public FetchXml: string) {
+                super("RetrieveMultiple", RetrieveMultipleSoapResponse);
+            }
+            Serialize(): string {
+                //First decode all invalid characters
+                var fetchXml = FetchSoapRequest.DecodeFetchXML(this.FetchXml);
+
+                //now re-encode all invalid characters
+                fetchXml = FetchSoapRequest.EncodeFetchXML(fetchXml);
+
+                return "<RetrieveMultiple><query i:type='a:FetchExpression'><a:Query>" + fetchXml + "</a:Query></query></RetrieveMultiple>";
+            }
+            private static DecodeFetchXML(fetchXML: string): string {
+                fetchXML = fetchXML.replace(/&amp;/g, "&");
+                fetchXML = fetchXML.replace(/&lt;/g, "<");
+                fetchXML = fetchXML.replace(/&gt;/g, ">");
+                fetchXML = fetchXML.replace(/&apos;/g, "'");
+                fetchXML = fetchXML.replace(/&quot;/g, "\"");
+                return fetchXML;
+            }
+            private static EncodeFetchXML(fetchXML: string): string {
+                fetchXML = fetchXML.replace(/&/g, "&amp;");
+                fetchXML = fetchXML.replace(/</g, "&lt;");
+                fetchXML = fetchXML.replace(/>/g, "&gt;");
+                fetchXML = fetchXML.replace(/'/g, "&apos;");
+                fetchXML = fetchXML.replace(/\"/g, "&quot;");
+                return fetchXML;
             }
         }
         export class Entity implements ISerializable {
@@ -909,6 +921,50 @@ module XrmTSToolkit {
              * attribute: Entity.Attributes["attributename"] = ...
              */
             Attributes: AttributeCollection;
+            getAttribute<T extends AttributeValue>(attributeName: string): T {
+                return <T>this.Attributes[attributeName];
+                //if (value) {
+                //    if ((typeof (tInstance) === "string" || typeof (tInstance) === "boolean" || tInstance instanceof Date || typeof (tInstance) === "number") && value instanceof AttributeValue) {
+                //        // Return the value of the attribute value;
+                //        var attr: AttributeValue = value;
+                //        return <T>attr.Value;
+                //    }
+                //    else
+                //        return <T><any>value;
+                //}
+            }
+            private getRaw<T>(attributeName: string): T {
+                var value = <AttributeValue>this.Attributes[attributeName];
+                if (value)
+                    return value.Value;
+                else
+                    return null;
+            }
+            /**
+             * The attribute to return as a string value
+             */
+            getString(attributeName: string): string {
+                return this.getRaw<string>(attributeName);
+            }
+             /**
+             * The attribute to return as a boolean value
+             */
+            getBool(attributeName: string): boolean {
+                return this.getRaw<boolean>(attributeName);
+            }
+             /**
+             * The attribute to return as a number value
+             */
+            getNumber(attributeName: string): number {
+                return this.getRaw<number>(attributeName);
+            }
+             /**
+             * The attribute to return as a date value
+             */
+            getDate(attributeName: string): Date {
+                return this.getRaw<Date>(attributeName);
+            }
+
             FormattedValues: StringDictionary<string>;
             Serialize(): string {
                 var data: string = "<a:Attributes>";
@@ -1284,27 +1340,6 @@ module XrmTSToolkit {
             IsKeyValuePair: boolean = false;
             Parent: XRMObject;
         }
-        export class CreateSoapResponse extends SoapResponse {
-            constructor(responseXML: string) {
-                super(responseXML);
-                this.PropertyTypes["CreateResult"] = "s";
-            }
-            /** The GUID of the newly created record. */
-            CreateResult: string;
-        }
-        export class UpdateSoapResponse extends SoapResponse { }
-        export class DeleteSoapResponse extends SoapResponse { }
-        export class RetrieveSoapResponse extends SoapResponse {
-            constructor(responseXML: string) {
-                super(responseXML);
-                this.PropertyTypes["RetrieveResult"] = "Entity";
-            }
-            /** The retrieved Soap.Entity */
-            RetrieveResult: Entity;
-        }
-        export class RetrieveMultipleSoapResponse extends SoapResponse {
-            RetrieveMultipleResult: RetrieveMultipleResult;
-        }
         export class RetrieveMultipleResult {
             PropertyTypes = {
                 Entities: "[Entity]",
@@ -1324,8 +1359,8 @@ module XrmTSToolkit {
             MinActiveRowVersion: number;
         }
         export class FaultResponse extends SoapResponse {
-            constructor(responseXML: string) {
-                super(responseXML);
+            constructor(responseXml: string) {
+                super(responseXml);
                 this.PropertyTypes["detail"] = "FaultDetail";
                 this.PropertyTypes["faultcode"] = "s";
                 this.PropertyTypes["faultstring"] = "s";
@@ -1333,6 +1368,18 @@ module XrmTSToolkit {
             detail: FaultDetail;
             faultcode: string;
             faultstring: string;
+            private _errorMessage: string;
+            public get errorMessage(): string {
+                if (this._errorMessage)
+                    return this._errorMessage;
+                else if (this.detail && this.detail.OrganizationServiceFault)
+                    return this.detail.OrganizationServiceFault.Message;
+                else
+                    return this.faultstring;
+            }
+            public set errorMessage(value: string) {
+                this._errorMessage = value;
+            }
         }
         export class FaultDetail {
             PropertyTypes = {
@@ -1353,408 +1400,11 @@ module XrmTSToolkit {
             Message: string;
             Timestamp: string;
         }
-
-    }
-
-    export module Soap.Query {
-        export class QueryExpression {
-            /**
-             * Constructor.
-             *
-             * @param   {string}    EntityName  Logical Name of the entity.
-             */
-            constructor(public EntityName?: string) { }
-
-            Columns: ColumnSet = new ColumnSet(false);
-            Criteria: FilterExpression = null;
-            PageInfo: PageInfo = new PageInfo();
-            Orders: Array<OrderExpression> = [];
-            LinkEntities: Array<LinkEntity> = [];
-            NoLock: boolean = false;
-
-            serialize(): string {
-                //Query
-                var data: string = "<query i:type=\"a:QueryExpression\">";
-
-                //Columnset
-                data += "<a:ColumnSet>" + this.Columns.Serialize() + "</a:ColumnSet>";
-
-                //Criteria - Serailize the FilterExpression
-                if (this.Criteria == null) {
-                    data += "<a:Criteria i:nil=\"true\"/>";
-                }
-                else {
-                    data += "<a:Criteria>";
-                    data += this.Criteria.serialize();
-                    data += "</a:Criteria>";
-                }
-
-                data += "<a:Distinct>false</a:Distinct>";
-                data += "<a:EntityName>" + this.EntityName + "</a:EntityName>";
-
-                //Link Entities
-                if (this.LinkEntities.length == 0) {
-                    data += "<a:LinkEntities />";
-                }
-                else {
-                    data += "<a:LinkEntities>";
-                    $.each(this.LinkEntities, function (index, LinkEntity) {
-                        data += LinkEntity.serialize();
-                    });
-                    data += "</a:LinkEntities>";
-                }
-
-                //Sorting
-                if (this.Orders.length == 0) {
-                    data += "<a:Orders />";
-                }
-                else {
-                    data += "<a:Orders>";
-                    $.each(this.Orders, function (index, Order) {
-                        data += Order.serialize();
-                    });
-                    data += "</a:Orders>";
-                }
-
-                //Page Info
-                data += this.PageInfo.serialize();
-
-                //No Lock
-                data += "<a:NoLock>" + this.NoLock.toString() + "</a:NoLock>";
-
-                data += "</query>";
-                return data;
-            }
-        }
-        export class FilterExpression {
-            constructor();
-
-            /**
-             * Constructor.
-             *
-             * @param   {LogicalOperator}   filterOperator  The filter operator.
-             */
-            constructor(filterOperator: LogicalOperator);
-            constructor(filterOperator?: LogicalOperator) {
-                if (filterOperator === undefined) {
-                    this.FilterOperator = LogicalOperator.And;
-                }
-            }
-            FilterOperator: LogicalOperator = LogicalOperator.And;
-            Conditions: Array<ConditionExpression> = [];
-            Filters: Array<FilterExpression> = [];
-
-            AddFilter(p: LogicalOperator): void;
-            AddFilter(p: FilterExpression): void;
-            AddFilter(p: any): void {
-                if (typeof p === "number") // enum
-                    p = new FilterExpression(p);
-                this.Filters.push(p);
-            }
-
-            AddCondition(p: ConditionExpression): void;
-            AddCondition(p: String, Operator: ConditionOperator, Values: any): ConditionExpression;
-            AddCondition(p: any, Operator?: ConditionOperator, Values?: any): ConditionExpression {
-                if (typeof p === "string") {
-                    p = new ConditionExpression(p, Operator, Values);
-                }
-                this.Conditions.push(p);
-                return p;
-            }
-
-            IsQuickFindFilter: boolean = false;
-
-            serialize(): string {
-                var data: string = "<a:Conditions>";
-                //Conditions
-                $.each(this.Conditions, function (i, Condition) {
-                    data += Condition.serialize();
-                });
-                data += "</a:Conditions>";
-
-                //Filter Operator
-                data += "<a:FilterOperator>" + LogicalOperator[this.FilterOperator].toString() + "</a:FilterOperator>";
-
-                //Filters
-                if (this.Filters.length == 0) {
-                    data += "<a:Filters/>";
-                }
-                else {
-                    data += "<a:Filters>";
-                    $.each(this.Filters, function (i, Filter) {
-                        data += "<a:FilterExpression>"
-                        data += Filter.serialize();
-                        data += "</a:FilterExpression>";
-                    });
-                    data += "</a:Filters>";
-                }
-
-                //IsQuickFindFilter
-                data += "<a:IsQuickFindFilter>" + this.IsQuickFindFilter.toString() + "</a:IsQuickFindFilter>";
-                return data;
-            }
-        }
-        export class ConditionExpression {
-            constructor();
-
-            /**
-             * Constructor.
-             *
-             * @param   {string}    AttributeName       Name of the attribute.
-             * @param   {ConditionOperator} Operator    The comparison operator.
-             * @param   {AttributeValue}    value       The value to be compared to.
-             */
-            constructor(AttributeName: string, Operator: ConditionOperator, Value?: AttributeValue | string | boolean | Date);
-
-            /**
-             * Constructor.
-             *
-             * @param   {string}    AttributeName       Name of the attribute.
-             * @param   {ConditionOperator} Operator    The comparison operator.
-             * @param   {Array{AttributeValue}} values  The values to be compared to.
-             */
-            constructor(AttributeName: string, Operator: ConditionOperator, Values?: Array<AttributeValue | string | boolean | Date>);
-            constructor(public AttributeName?: string, public Operator?: ConditionOperator, Values?: any) {
-                if (Values instanceof Array) {
-                    this.Values = Values;
-                }
-                else {
-                    this.Values.push(Values);
-                }
-            }
-
-            Values: Array<AttributeValue | string | boolean | Date> = [];
-
-            serialize(): string {
-                var data: string =
-                    "<a:ConditionExpression>" +
-                    "<a:AttributeName>" + this.AttributeName + "</a:AttributeName>" +
-                    "<a:Operator>" + ConditionOperator[this.Operator].toString() + "</a:Operator>" +
-                    "<a:Values>";
-                $.each(this.Values, function (i, value) {
-                    if (typeof value === "string") {
-                        var stringValue = new StringValue(value);
-                        data += "<f:anyType i:type=\"" + stringValue.GetValueType() + "\">" + stringValue.GetEncodedValue() + "</f:anyType>";
-                    }
-                    else if (typeof value === "boolean") {
-                        var boolValue = new BooleanValue(value);
-                        data += "<f:anyType i:type=\"" + boolValue.GetValueType() + "\">" + boolValue.GetEncodedValue() + "</f:anyType>";
-                    }
-                    else if (value instanceof Date)
-                    {
-                        var dateValue = new DateValue(value);
-                        data += "<f:anyType i:type=\"" + dateValue.GetValueType() + "\">" + dateValue.GetEncodedValue() + "</f:anyType>";
-                    }
-                    else
-                        data += "<f:anyType i:type=\"" + value.GetValueType() + "\">" + value.GetEncodedValue() + "</f:anyType>";
-                });
-                data += "</a:Values>" +
-                    "</a:ConditionExpression>";
-                return data;
-            }
-        }
-        export class PageInfo {
-            constructor() { }
-            Count: number = 0;
-            PageNumber: number = 1;
-            PagingCookie: string = null;
-            ReturnTotalRecordCount: boolean = false;
-
-            serialize(): string {
-                var data: string = "" +
-                    "<a:PageInfo>" +
-                    "<a:Count>" + this.Count.toString() + "</a:Count>" +
-                    "<a:PageNumber>" + this.PageNumber.toString() + "</a:PageNumber>";
-                if (this.PagingCookie == null) {
-                    data += "<a:PagingCookie i:nil = \"true\" />";
-                }
-                else {
-                    data += "<a:PagingCookie>" + this.PagingCookie + "</a:PagingCookie>";
-                }
-                data += "<a:ReturnTotalRecordCount>" + this.ReturnTotalRecordCount.toString() + "</a:ReturnTotalRecordCount></a:PageInfo>";
-                return data;
-            }
-        }
-        export class OrderExpression {
-            constructor();
-
-            /**
-             * Constructor.
-             *
-             * @param   {string}    AttributeName   Name of the attribute.
-             * @param   {OrderType} OrderType       Type of the order.
-             */
-            constructor(attributeName: string, orderType: OrderType);
-            constructor(public AttributeName?: string, public OrderType?: OrderType) { }
-            serialize(): string {
-                var data: string = "<a:OrderExpression>";
-                data += "<a:AttributeName>" + this.AttributeName + "</a:AttributeName>";
-                data += "<a:OrderType>" + OrderType[this.OrderType].toString() + "</a:OrderType>";
-                data += "</a:OrderExpression>";
-                return data;
-            }
-        }
-        export class LinkEntity {
-
-            /**
-             * Constructor.
-             *
-             * @param   {string}    LinkFromEntityName                  LogicalName of the link from entity.
-             * @param   {string}    LinkToEntityName                    LogicalName of the link to entity.
-             * @param   {string}    LinkFromAttributeName               LogicalName of the link from
-             *                                                          attribute.
-             * @param   {string}    LinkToAttributeName                 LogicalName of the link to attribute.
-             * @param   {JoinOperator}  optional public JoinOperator    JoinOperator    The optional join
-             *                                                          operator.
-             */
-            constructor(
-                public LinkFromEntityName: string,
-                public LinkToEntityName: string,
-                public LinkFromAttributeName: string,
-                public LinkToAttributeName: string,
-                public JoinOperator: JoinOperator = Soap.Query.JoinOperator.Inner) { }
-
-            Columns: ColumnSet = new ColumnSet(false);
-            EntityAlias: string = null;
-            LinkCriteria: FilterExpression = new FilterExpression(Soap.Query.LogicalOperator.And);
-            LinkEntities: Array<LinkEntity> = [];
-
-            serialize(): string {
-                var data: string = "<a:LinkEntity>";
-                data += this.Columns.Serialize();
-                if (this.EntityAlias == null) {
-                    data += "<a:EntityAlias i:nil=\"true\"/>";
-                }
-                else {
-                    data += "<a:EntityAlias>" + this.EntityAlias + "</a:EntityAlias>";
-                }
-                data += "<a:JoinOperator>" + JoinOperator[this.JoinOperator].toString() + "</a:JoinOperator>";
-                data += " <a:LinkCriteria>";
-                data += this.LinkCriteria.serialize();
-                data += "</a:LinkCriteria>";
-                if (this.LinkEntities.length == 0) {
-                    data += "<a:LinkEntities />";
-                }
-                else {
-                    data += "<a:LinkEntities>";
-                    $.each(this.LinkEntities, function (index, linkEntity) {
-                        data += linkEntity.serialize();
-                    });
-                    data += "</a:LinkEntities>";
-                }
-                data += "<a:LinkFromAttributeName>" + this.LinkFromAttributeName + "</a:LinkFromAttributeName>";
-                data += "<a:LinkFromEntityName>" + this.LinkFromEntityName + "</a:LinkFromEntityName>";
-                data += "<a:LinkToAttributeName>" + this.LinkToAttributeName + "</a:LinkToAttributeName>";
-                data += "<a:LinkToEntityName>" + this.LinkToEntityName + "</a:LinkToEntityName>";
-                data += "</a:LinkEntity>";
-                return data;
-            }
-        }
-        export enum JoinOperator {
-            Inner = 0,
-            LeftOuter = 1,
-            Natural = 2
-        }
-        export enum OrderType {
-            Ascending = 0,
-            Descending = 1
-        }
-        export enum LogicalOperator {
-            And = 0,
-            Or = 1
-        }
-        export enum ConditionOperator {
-            Equal = 0,
-            NotEqual = 1,
-            GreaterThan = 2,
-            LessThan = 3,
-            GreaterEqual = 4,
-            LessEqual = 5,
-            Like = 6,
-            NotLike = 7,
-            In = 8,
-            NotIn = 9,
-            Between = 10,
-            NotBetween = 11,
-            Null = 12,
-            NotNull = 13,
-            Yesterday = 14,
-            Today = 15,
-            Tomorrow = 16,
-            Last7Days = 17,
-            Next7Days = 18,
-            LastWeek = 19,
-            ThisWeek = 20,
-            NextWeek = 21,
-            LastMonth = 22,
-            ThisMonth = 23,
-            NextMonth = 24,
-            On = 25,
-            OnOrBefore = 26,
-            OnOrAfter = 27,
-            LastYear = 28,
-            ThisYear = 29,
-            NextYear = 30,
-            LastXHours = 31,
-            NextXHours = 32,
-            LastXDays = 33,
-            NextXDays = 34,
-            LastXWeeks = 35,
-            NextXWeeks = 36,
-            LastXMonths = 37,
-            NextXMonths = 38,
-            LastXYears = 39,
-            NextXYears = 40,
-            EqualUserId = 41,
-            NotEqualUserId = 42,
-            EqualBusinessId = 43,
-            NotEqualBusinessId = 44,
-            ChildOf = 45,
-            Mask = 46,
-            NotMask = 47,
-            MasksSelect = 48,
-            Contains = 49,
-            DoesNotContain = 50,
-            EqualUserLanguage = 51,
-            NotOn = 52,
-            OlderThanXMonths = 53,
-            BeginsWith = 54,
-            DoesNotBeginWith = 55,
-            EndsWith = 56,
-            DoesNotEndWith = 57,
-            ThisFiscalYear = 58,
-            ThisFiscalPeriod = 59,
-            NextFiscalYear = 60,
-            NextFiscalPeriod = 61,
-            LastFiscalYear = 62,
-            LastFiscalPeriod = 63,
-            LastXFiscalYears = 64,
-            LastXFiscalPeriods = 65,
-            NextXFiscalYears = 66,
-            NextXFiscalPeriods = 67,
-            InFiscalYear = 68,
-            InFiscalPeriod = 69,
-            InFiscalPeriodAndYear = 70,
-            InOrBeforeFiscalPeriodAndYear = 71,
-            InOrAfterFiscalPeriodAndYear = 72,
-            EqualUserTeams = 73
-        }
-    }
-    export module XML {
-        export class XMLElement {
-            Name: string;
-            Text: string;
-            TypeName: string;
-            Children: Array<XMLElement> = new Array<XMLElement>();
-            Parent: XMLElement;
-        }
-    }
-    export module Soap {
         export class PropertyTypeCollection {
             [index: string]: string;
         }
         //These are all the Organization Requests and Responses
-        export class ExecuteRequest {
+        export class ExecuteRequest extends Soap.SoapRequest<ExecuteResponse> {
 
             /**
              * Constructor.
@@ -1767,6 +1417,7 @@ module XrmTSToolkit {
              * @param   {ParameterCollection}   Parameters  Parameters for the operation.
              */
             constructor(public RequestName: string, public RequestType?: string, public Parameters?: ParameterCollection) {
+                super("Execute", ExecuteResponse);
                 if (!Parameters || Parameters == null) {
                     this.Parameters = new ParameterCollection();
                 }
@@ -1780,7 +1431,9 @@ module XrmTSToolkit {
             IsCustomAction: boolean = false;
             Serialize(): string {
                 var xml = "";
-                if (this.IncludeExecuteHeader) { xml += "<Execute" + Soap.GetNameSpacesXML() + ">"; }
+                if (this.IncludeExecuteHeader)
+                    xml += "<Execute" + Soap.GetNameSpacesXML() + ">";
+
                 if (this.IsCustomAction)
                     xml += "<request><a:Parameters>";
                 else
@@ -1813,12 +1466,24 @@ module XrmTSToolkit {
             }
         }
         export class ExecuteResponse extends SoapResponse {
-            constructor(responseXML: string) {
-                super(responseXML);
+            constructor(responseXml: string) {
+                super(responseXml);
                 this.PropertyTypes["Results"] = "AttributeCollection";
             }
             Results: AttributeCollection;
             ResponseName: string;
+        }
+        export class RawExecuteRequest extends ExecuteRequest {
+            constructor(public SoapXml: string) { super("", ""); }
+            Serialize(): string {
+                return this.SoapXml;
+            }
+        }
+        export class CustomActionRequest extends ExecuteRequest {
+            constructor(customActionName: string) {
+                super(customActionName);
+                this.IsCustomAction = true;
+            }
         }
         export class CreateRequest extends ExecuteRequest {
 
@@ -1831,15 +1496,18 @@ module XrmTSToolkit {
                 super("Create", "a:CreateRequest");
                 this.Parameters["Target"] = target;
             }
+            CreateResponse(responseXml: string): Soap.ExecuteResponse {
+                return new Soap.CreateResponse(responseXml);
+            }
         }
         export class CreateResponse extends ExecuteResponse {
-            constructor(responseXML: string) {
-                super(responseXML);
+            constructor(responseXml: string) {
+                super(responseXml);
                 this.PropertyTypes["id"] = "s";
                 this.PropertyTypes["CreateResult"] = "s";
             }
             ParseResult(): void {
-                super.ParseResultInernal(this.ResponseXML);
+                super.ParseResultInternal(this.ResponseXml);
                 if ((<any>this).CreateResult) {
                     this.id = (<any>this).CreateResult;
                 }
@@ -1857,6 +1525,9 @@ module XrmTSToolkit {
                 super("Update", "a:UpdateRequest");
                 this.Parameters["Target"] = target;
             }
+            CreateResponse(responseXml: string): Soap.ExecuteResponse {
+                return new Soap.UpdateResponse(responseXml);
+            }
         }
         export class UpdateResponse extends ExecuteResponse { }
         export class DeleteRequest extends ExecuteRequest {
@@ -1870,10 +1541,15 @@ module XrmTSToolkit {
                 super("Delete", "a:DeleteRequest");
                 this.Parameters["Target"] = target;
             }
+            CreateResponse(responseXml: string): Soap.ExecuteResponse {
+                return new Soap.DeleteResponse(responseXml);
+            }
         }
         export class DeleteResponse extends ExecuteResponse { }
         export class RetrieveRequest extends ExecuteRequest {
-
+            CreateResponse(responseXml: string): Soap.ExecuteResponse {
+                return new Soap.RetrieveResponse(responseXml);
+            }
         }
         export class RetrieveResponse extends ExecuteResponse {
 
@@ -1894,6 +1570,9 @@ module XrmTSToolkit {
                 this.Parameters["Moniker2"] = moniker2;
                 this.Parameters["RelationshipName"] = new Soap.StringValue(relationshipName);
             }
+            CreateResponse(responseXml: string): Soap.ExecuteResponse {
+                return new Soap.AssociateResponse(responseXml);
+            }
         }
         export class AssociateResponse extends ExecuteResponse { }
         export class DisassociateRequest extends ExecuteRequest {
@@ -1910,6 +1589,9 @@ module XrmTSToolkit {
                 this.Parameters["Moniker1"] = moniker1;
                 this.Parameters["Moniker2"] = moniker2;
                 this.Parameters["RelationshipName"] = new Soap.StringValue(relationshipName);
+            }
+            CreateResponse(responseXml: string): Soap.ExecuteResponse {
+                return new Soap.DisassociateResponse(responseXml);
             }
         }
         export class DisassociateResponse extends ExecuteResponse { }
@@ -1945,16 +1627,22 @@ module XrmTSToolkit {
                 this.Parameters["State"] = stateOptionSet;
                 this.Parameters["Status"] = statusOptionSet;
             }
+            CreateResponse(responseXml: string): Soap.ExecuteResponse {
+                return new Soap.SetStateResponse(responseXml);
+            }
         }
         export class SetStateResponse extends ExecuteResponse { }
         export class WhoAmIRequest extends ExecuteRequest {
             constructor() {
                 super("WhoAmI");
             }
+            CreateResponse(responseXml: string): Soap.ExecuteResponse {
+                return new Soap.WhoAmIResponse(responseXml);
+            }
         }
         export class WhoAmIResponse extends ExecuteResponse {
-            constructor(responseXML: string) {
-                super(responseXML);
+            constructor(responseXml: string) {
+                super(responseXml);
                 this.PropertyTypes["UserId"] = "s";
                 this.PropertyTypes["BusinessUnitId"] = "s";
                 this.PropertyTypes["OrganizationId"] = "s";
@@ -1975,6 +1663,9 @@ module XrmTSToolkit {
                 super("Assign");
                 this.Parameters["Assignee"] = assignee;
                 this.Parameters["Target"] = target;
+            }
+            CreateResponse(responseXml: string): Soap.ExecuteResponse {
+                return new Soap.AssignResponse(responseXml);
             }
         }
         export class AssignResponse extends ExecuteResponse { }
@@ -2010,6 +1701,9 @@ module XrmTSToolkit {
                 xml += "</request></Execute>";
                 return xml;
             }
+            CreateResponse(responseXml: string): Soap.ExecuteResponse {
+                return new Soap.ExecuteMultipleResponse(responseXml);
+            }
         }
         export class ExecuteMultipleSettings {
 
@@ -2027,8 +1721,8 @@ module XrmTSToolkit {
             }
         }
         export class ExecuteMultipleResponse extends ExecuteResponse {
-            constructor(responseXML: string) {
-                super(responseXML);
+            constructor(responseXml: string) {
+                super(responseXml);
                 this.PropertyTypes["Responses"] = "ExecuteMultipleResponseItem";
                 this.PropertyTypes["ResponseName"] = "s";
             }
@@ -2060,6 +1754,9 @@ module XrmTSToolkit {
                 this.Parameters["Target"] = target;
                 this.Parameters["PrincipalAccess"] = new PrincipalAccess(accessMask, principal);
             }
+            CreateResponse(responseXml: string): Soap.ExecuteResponse {
+                return new Soap.GrantAccessResponse(responseXml);
+            }
         }
         export class GrantAccessResponse extends ExecuteResponse { }
         export class ModifyAccessRequest extends ExecuteRequest {
@@ -2076,6 +1773,9 @@ module XrmTSToolkit {
                 this.Parameters["Target"] = target;
                 this.Parameters["PrincipalAccess"] = new PrincipalAccess(accessMask, principal);
             }
+            CreateResponse(responseXml: string): Soap.ExecuteResponse {
+                return new Soap.ModifyAccessResponse(responseXml);
+            }
         }
         export class ModifyAccessResponse extends ExecuteResponse { }
         export class RevokeAccessRequest extends ExecuteRequest {
@@ -2090,6 +1790,9 @@ module XrmTSToolkit {
                 super("RevokeAccess");
                 this.Parameters["Target"] = target;
                 this.Parameters["Revokee"] = revokee;
+            }
+            CreateResponse(responseXml: string): Soap.ExecuteResponse {
+                return new Soap.RevokeAccessResponse(responseXml);
             }
         }
         export class RevokeAccessResponse extends ExecuteResponse { }
@@ -2106,10 +1809,13 @@ module XrmTSToolkit {
                 this.Parameters["Target"] = target;
                 this.Parameters["Principal"] = principal;
             }
+            CreateResponse(responseXml: string): Soap.ExecuteResponse {
+                return new Soap.RetrievePrincipleAccessResponse(responseXml);
+            }
         }
         export class RetrievePrincipleAccessResponse extends ExecuteResponse {
-            constructor(responseXML: string) {
-                super(responseXML);
+            constructor(responseXml: string) {
+                super(responseXml);
                 this.PropertyTypes["AccessRights"] = "[n]";
             }
             AccessRights: Array<AccessRights>;
@@ -2142,6 +1848,9 @@ module XrmTSToolkit {
                 this.Parameters["MetadataId"] = new GuidValue("00000000-0000-0000-0000-000000000000");
                 this.Parameters["RetrieveAsIfPublished"] = new BooleanValue(true);
                 this.Parameters["LogicalName"] = new StringValue(logicalName);
+            }
+            CreateResponse(responseXml: string): Soap.ExecuteResponse {
+                return new Soap.RetrieveEntityResponse(responseXml);
             }
         }
         export class RetrieveEntityResponse extends ExecuteResponse {
@@ -2984,6 +2693,390 @@ module XrmTSToolkit {
             //     internal
 
             Phone = 7
+        }
+    }
+    export module Soap.Query {
+        export class QueryExpression {
+            /**
+             * Constructor.
+             *
+             * @param   {string}    EntityName  Logical Name of the entity.
+             */
+            constructor(public EntityName?: string) { }
+
+            Columns: ColumnSet = new ColumnSet(false);
+            Criteria: FilterExpression = new FilterExpression();
+            PageInfo: PageInfo = new PageInfo();
+            Orders: Array<OrderExpression> = [];
+            LinkEntities: Array<LinkEntity> = [];
+            NoLock: boolean = false;
+            Distinct: boolean = false;
+
+            serialize(): string {
+                //Query
+                var data: string = "<query i:type=\"a:QueryExpression\">";
+
+                //Columnset
+                data += "<a:ColumnSet>" + this.Columns.Serialize() + "</a:ColumnSet>";
+
+                //Criteria - Serailize the FilterExpression
+                if (this.Criteria == null || this.Criteria.Conditions.length == 0) {
+                    data += "<a:Criteria i:nil=\"true\"/>";
+                }
+                else {
+                    data += "<a:Criteria>";
+                    data += this.Criteria.serialize();
+                    data += "</a:Criteria>";
+                }
+
+                data += "<a:Distinct>" + this.Distinct.toString() + "</a:Distinct>";
+                data += "<a:EntityName>" + this.EntityName + "</a:EntityName>";
+
+                //Link Entities
+                if (this.LinkEntities.length == 0) {
+                    data += "<a:LinkEntities />";
+                }
+                else {
+                    data += "<a:LinkEntities>";
+                    $.each(this.LinkEntities, function (index, LinkEntity) {
+                        data += LinkEntity.serialize();
+                    });
+                    data += "</a:LinkEntities>";
+                }
+
+                //Sorting
+                if (this.Orders.length == 0) {
+                    data += "<a:Orders />";
+                }
+                else {
+                    data += "<a:Orders>";
+                    $.each(this.Orders, function (index, Order) {
+                        data += Order.serialize();
+                    });
+                    data += "</a:Orders>";
+                }
+
+                //Page Info
+                data += this.PageInfo.serialize();
+
+                //No Lock
+                data += "<a:NoLock>" + this.NoLock.toString() + "</a:NoLock>";
+
+                data += "</query>";
+                return data;
+            }
+        }
+        export class FilterExpression {
+            constructor();
+
+            /**
+             * Constructor.
+             *
+             * @param   {LogicalOperator}   filterOperator  The filter operator.
+             */
+            constructor(filterOperator: LogicalOperator);
+            constructor(filterOperator?: LogicalOperator) {
+                if (filterOperator === undefined) {
+                    this.FilterOperator = LogicalOperator.And;
+                }
+            }
+            FilterOperator: LogicalOperator = LogicalOperator.And;
+            Conditions: Array<ConditionExpression> = [];
+            Filters: Array<FilterExpression> = [];
+
+            AddFilter(p: LogicalOperator): void;
+            AddFilter(p: FilterExpression): void;
+            AddFilter(p: any): void {
+                if (typeof p === "number") // enum
+                    p = new FilterExpression(p);
+                this.Filters.push(p);
+            }
+
+            AddCondition(p: ConditionExpression): void;
+            AddCondition(p: String, Operator: ConditionOperator, Values: any): ConditionExpression;
+            AddCondition(p: any, Operator?: ConditionOperator, Values?: any): ConditionExpression {
+                if (typeof p === "string") {
+                    p = new ConditionExpression(p, Operator, Values);
+                }
+                this.Conditions.push(p);
+                return p;
+            }
+
+            IsQuickFindFilter: boolean = false;
+
+            serialize(): string {
+                var data: string = "<a:Conditions>";
+                //Conditions
+                $.each(this.Conditions, function (i, Condition) {
+                    data += Condition.serialize();
+                });
+                data += "</a:Conditions>";
+
+                //Filter Operator
+                data += "<a:FilterOperator>" + LogicalOperator[this.FilterOperator].toString() + "</a:FilterOperator>";
+
+                //Filters
+                if (this.Filters.length == 0) {
+                    data += "<a:Filters/>";
+                }
+                else {
+                    data += "<a:Filters>";
+                    $.each(this.Filters, function (i, Filter) {
+                        data += "<a:FilterExpression>"
+                        data += Filter.serialize();
+                        data += "</a:FilterExpression>";
+                    });
+                    data += "</a:Filters>";
+                }
+
+                //IsQuickFindFilter
+                data += "<a:IsQuickFindFilter>" + this.IsQuickFindFilter.toString() + "</a:IsQuickFindFilter>";
+                return data;
+            }
+        }
+        export class ConditionExpression {
+            constructor();
+
+            /**
+             * Constructor.
+             *
+             * @param   {string}    AttributeName       Name of the attribute.
+             * @param   {ConditionOperator} Operator    The comparison operator.
+             * @param   {AttributeValue}    value       The value to be compared to.
+             */
+            constructor(AttributeName: string, Operator: ConditionOperator, Value?: AttributeValue | string | boolean | Date);
+
+            /**
+             * Constructor.
+             *
+             * @param   {string}    AttributeName       Name of the attribute.
+             * @param   {ConditionOperator} Operator    The comparison operator.
+             * @param   {Array{AttributeValue}} values  The values to be compared to.
+             */
+            constructor(AttributeName: string, Operator: ConditionOperator, Values?: Array<AttributeValue | string | boolean | Date>);
+            constructor(public AttributeName?: string, public Operator?: ConditionOperator, Values?: any) {
+                if (Values instanceof Array) {
+                    this.Values = Values;
+                }
+                else {
+                    this.Values.push(Values);
+                }
+            }
+
+            Values: Array<AttributeValue | string | boolean | Date> = [];
+
+            serialize(): string {
+                var data: string =
+                    "<a:ConditionExpression>" +
+                    "<a:AttributeName>" + this.AttributeName + "</a:AttributeName>" +
+                    "<a:Operator>" + ConditionOperator[this.Operator].toString() + "</a:Operator>" +
+                    "<a:Values>";
+                $.each(this.Values, function (i, value) {
+                    if (typeof value === "string") {
+                        var stringValue = new StringValue(value);
+                        data += "<f:anyType i:type=\"" + stringValue.GetValueType() + "\">" + stringValue.GetEncodedValue() + "</f:anyType>";
+                    }
+                    else if (typeof value === "boolean") {
+                        var boolValue = new BooleanValue(value);
+                        data += "<f:anyType i:type=\"" + boolValue.GetValueType() + "\">" + boolValue.GetEncodedValue() + "</f:anyType>";
+                    }
+                    else if (value instanceof Date) {
+                        var dateValue = new DateValue(value);
+                        data += "<f:anyType i:type=\"" + dateValue.GetValueType() + "\">" + dateValue.GetEncodedValue() + "</f:anyType>";
+                    }
+                    else
+                        data += "<f:anyType i:type=\"" + value.GetValueType() + "\">" + value.GetEncodedValue() + "</f:anyType>";
+                });
+                data += "</a:Values>" +
+                    "</a:ConditionExpression>";
+                return data;
+            }
+        }
+        export class PageInfo {
+            constructor() { }
+            Count: number = 0;
+            PageNumber: number = 1;
+            PagingCookie: string = null;
+            ReturnTotalRecordCount: boolean = false;
+
+            serialize(): string {
+                var data: string = "" +
+                    "<a:PageInfo>" +
+                    "<a:Count>" + this.Count.toString() + "</a:Count>" +
+                    "<a:PageNumber>" + this.PageNumber.toString() + "</a:PageNumber>";
+                if (this.PagingCookie == null) {
+                    data += "<a:PagingCookie i:nil = \"true\" />";
+                }
+                else {
+                    data += "<a:PagingCookie>" + this.PagingCookie + "</a:PagingCookie>";
+                }
+                data += "<a:ReturnTotalRecordCount>" + this.ReturnTotalRecordCount.toString() + "</a:ReturnTotalRecordCount></a:PageInfo>";
+                return data;
+            }
+        }
+        export class OrderExpression {
+            constructor();
+
+            /**
+             * Constructor.
+             *
+             * @param   {string}    AttributeName   Name of the attribute.
+             * @param   {OrderType} OrderType       Type of the order.
+             */
+            constructor(attributeName: string, orderType: OrderType);
+            constructor(public AttributeName?: string, public OrderType?: OrderType) { }
+            serialize(): string {
+                var data: string = "<a:OrderExpression>";
+                data += "<a:AttributeName>" + this.AttributeName + "</a:AttributeName>";
+                data += "<a:OrderType>" + OrderType[this.OrderType].toString() + "</a:OrderType>";
+                data += "</a:OrderExpression>";
+                return data;
+            }
+        }
+        export class LinkEntity {
+
+            /**
+             * Constructor.
+             *
+             * @param   {string}    LinkFromEntityName                  LogicalName of the link from entity.
+             * @param   {string}    LinkToEntityName                    LogicalName of the link to entity.
+             * @param   {string}    LinkFromAttributeName               LogicalName of the link from
+             *                                                          attribute.
+             * @param   {string}    LinkToAttributeName                 LogicalName of the link to attribute.
+             * @param   {JoinOperator}  optional public JoinOperator    JoinOperator    The optional join
+             *                                                          operator.
+             */
+            constructor(
+                public LinkFromEntityName: string,
+                public LinkToEntityName: string,
+                public LinkFromAttributeName: string,
+                public LinkToAttributeName: string,
+                public JoinOperator: JoinOperator = Soap.Query.JoinOperator.Inner) { }
+
+            Columns: ColumnSet = new ColumnSet(false);
+            EntityAlias: string = null;
+            LinkCriteria: FilterExpression = new FilterExpression(Soap.Query.LogicalOperator.And);
+            LinkEntities: Array<LinkEntity> = [];
+
+            serialize(): string {
+                var data: string = "<a:LinkEntity>";
+                data += this.Columns.Serialize();
+                if (this.EntityAlias == null) {
+                    data += "<a:EntityAlias i:nil=\"true\"/>";
+                }
+                else {
+                    data += "<a:EntityAlias>" + this.EntityAlias + "</a:EntityAlias>";
+                }
+                data += "<a:JoinOperator>" + JoinOperator[this.JoinOperator].toString() + "</a:JoinOperator>";
+                data += " <a:LinkCriteria>";
+                data += this.LinkCriteria.serialize();
+                data += "</a:LinkCriteria>";
+                if (this.LinkEntities.length == 0) {
+                    data += "<a:LinkEntities />";
+                }
+                else {
+                    data += "<a:LinkEntities>";
+                    $.each(this.LinkEntities, function (index, linkEntity) {
+                        data += linkEntity.serialize();
+                    });
+                    data += "</a:LinkEntities>";
+                }
+                data += "<a:LinkFromAttributeName>" + this.LinkFromAttributeName + "</a:LinkFromAttributeName>";
+                data += "<a:LinkFromEntityName>" + this.LinkFromEntityName + "</a:LinkFromEntityName>";
+                data += "<a:LinkToAttributeName>" + this.LinkToAttributeName + "</a:LinkToAttributeName>";
+                data += "<a:LinkToEntityName>" + this.LinkToEntityName + "</a:LinkToEntityName>";
+                data += "</a:LinkEntity>";
+                return data;
+            }
+        }
+        export enum JoinOperator {
+            Inner = 0,
+            LeftOuter = 1,
+            Natural = 2
+        }
+        export enum OrderType {
+            Ascending = 0,
+            Descending = 1
+        }
+        export enum LogicalOperator {
+            And = 0,
+            Or = 1
+        }
+        export enum ConditionOperator {
+            Equal = 0,
+            NotEqual = 1,
+            GreaterThan = 2,
+            LessThan = 3,
+            GreaterEqual = 4,
+            LessEqual = 5,
+            Like = 6,
+            NotLike = 7,
+            In = 8,
+            NotIn = 9,
+            Between = 10,
+            NotBetween = 11,
+            Null = 12,
+            NotNull = 13,
+            Yesterday = 14,
+            Today = 15,
+            Tomorrow = 16,
+            Last7Days = 17,
+            Next7Days = 18,
+            LastWeek = 19,
+            ThisWeek = 20,
+            NextWeek = 21,
+            LastMonth = 22,
+            ThisMonth = 23,
+            NextMonth = 24,
+            On = 25,
+            OnOrBefore = 26,
+            OnOrAfter = 27,
+            LastYear = 28,
+            ThisYear = 29,
+            NextYear = 30,
+            LastXHours = 31,
+            NextXHours = 32,
+            LastXDays = 33,
+            NextXDays = 34,
+            LastXWeeks = 35,
+            NextXWeeks = 36,
+            LastXMonths = 37,
+            NextXMonths = 38,
+            LastXYears = 39,
+            NextXYears = 40,
+            EqualUserId = 41,
+            NotEqualUserId = 42,
+            EqualBusinessId = 43,
+            NotEqualBusinessId = 44,
+            ChildOf = 45,
+            Mask = 46,
+            NotMask = 47,
+            MasksSelect = 48,
+            Contains = 49,
+            DoesNotContain = 50,
+            EqualUserLanguage = 51,
+            NotOn = 52,
+            OlderThanXMonths = 53,
+            BeginsWith = 54,
+            DoesNotBeginWith = 55,
+            EndsWith = 56,
+            DoesNotEndWith = 57,
+            ThisFiscalYear = 58,
+            ThisFiscalPeriod = 59,
+            NextFiscalYear = 60,
+            NextFiscalPeriod = 61,
+            LastFiscalYear = 62,
+            LastFiscalPeriod = 63,
+            LastXFiscalYears = 64,
+            LastXFiscalPeriods = 65,
+            NextXFiscalYears = 66,
+            NextXFiscalPeriods = 67,
+            InFiscalYear = 68,
+            InFiscalPeriod = 69,
+            InFiscalPeriodAndYear = 70,
+            InOrBeforeFiscalPeriodAndYear = 71,
+            InOrAfterFiscalPeriodAndYear = 72,
+            EqualUserTeams = 73
         }
     }
 }

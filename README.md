@@ -142,9 +142,24 @@ promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
 var promise = XrmTSToolkit.Soap.Retrieve("9C8AF527-2D96-4ADB-9C0B-A21BF460CDDA", "account", new XrmTSToolkit.Soap.ColumnSet(true));
 promise.done(function (data: XrmTSToolkit.Soap.RetrieveSoapResponse, result, xhr) {
     var entity = data.RetrieveResponse;
+	var stringValue = (<XrmTSToolkit.Soap.StringValue> entity.Attributes["name"]).Value;
     var booleanValue = (<XrmTSToolkit.Soap.BooleanValue> entity.Attributes["creditonhold"]).Value;
+	var dateValue = (<XrmTSToolkit.Soap.DateValue> entity.Attributes["createdon"]).Value;
+	var integerValue = (<XrmTSToolkit.Soap.IntegerValue> entity.Attributes["createdon"]).Value;
     var ownerId = (<XrmTSToolkit.Soap.EntityReference> entity.Attributes["ownerid"]).Id;
     var ownerName = (<XrmTSToolkit.Soap.EntityReference> entity.Attributes["ownerid"]).Name;
+
+	// You can also get the values using the following:
+	stringValue = entity.getAttribute<XrmTSToolkit.Soap.StringValue>("name");
+	booleanValue = entity.getAttribute<XrmTSToolkit.Soap.BooleanValue>("creditonhold");
+	dateValue = entity.getAttribute<XrmTSToolkit.Soap.DateValue>("creditonhold");
+	integerValue = entity.getAttribute<XrmTSToolkit.Soap.IntegerValue>("creditonhold");
+
+	// Alternatively you can get the raw value using the corresponding method:
+	var stringRaw = entity.getString("name");
+	var boolRaw = entity.getBool("creditonhold");
+	var dateRaw = entity.getDate("createdon");
+	var numberRaw = entity.getNumber("numberofemployees");
 });
 promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
     //Error occured
@@ -280,7 +295,9 @@ var executeXML = "" +
     "</request>" +
     "</Execute>";
 
-var promise = XrmTSToolkit.Soap.Execute(executeXML);
+var executeRequest = new XrmTSToolkit.Soap.RawExecuteRequest(executeXml);
+
+var promise = XrmTSToolkit.Soap.Execute(executeRequest);
 promise.done(function (data: XrmTSToolkit.Soap.SoapResponse, result, xhr) {
     //WhoAmIRequest executed successfully
 });
@@ -416,20 +433,35 @@ promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
 To use custom actions it is required that you create a new TypeScript class that extends the 'ExecuteRequest' class.  The following is an example of how to accomplish it:
 
 ```typescript
-export class CustomActionRequest extends XrmTSToolkit.Soap.ExecuteRequest {
+export class CustomActionRequest extends XrmTSToolkit.Soap.CustomActionRequest {
 	constructor(account: XrmTSToolkit.Soap.EntityReference, stringValue: string) {
 		super("new_CustomActionName"); //This is the name of the custom action defined in CRM
         this.Parameters["Target"] = account;
-        this.Parameters["StringValue"] = stringValue;
-        this.IsCustomAction = true;  //Set this in order to let XrmTSToolkit know How to serialize the request.
+        this.Parameters["StringValue"] = stringValue; // Pass in any values needed for the custom action as 'Parameters'
 	}
+
+	// Optionally override the following method if you have created a specific response type class as shown below
+	CreateResponse(responseXml: string): CustomActionResponse {
+        return new CustomActionResponse(responseXml);
+    }
 }
 ```
 
 You can also choose To create an appropriate response to make it easier to read any results:
 ```typescript
 export class CustomActionResponse extends XrmTSToolkit.Soap.ExecuteResponse {
-	Result: string;
+	constructor(responseXml: string) {
+        super(responseXml);
+		// In order for XrmTSToolkit to know how to deserialize the 
+        this.PropertyTypes["ReturnValueString"] = "s"; // s == string
+        this.PropertyTypes["ReturnValueBool"] = "b"; // b == bool
+        this.PropertyTypes["ReturnValueInt"] = "n"; // n == number
+        this.PropertyTypes["ReturnValueMoney"] = "n";
+    }
+    ReturnValueString: string;
+    ReturnValueBool: boolean;
+    ReturnValueInt: number;
+    ReturnValueMoney: number;
 }
 ```
 

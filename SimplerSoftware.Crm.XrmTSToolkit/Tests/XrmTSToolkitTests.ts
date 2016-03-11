@@ -21,7 +21,8 @@ function RunTests(): void {
         $("#testresults").empty();
 
         var Tests = new Array<any>();
-        Tests.push(CreateAccount);
+        Tests.push(CreateAccountTest);
+        Tests.push(CustomActionTest);
         Tests.push(UpdateEntityTest1);
         Tests.push(RetrieveEntityTest);
         Tests.push(AssociateTest);
@@ -54,6 +55,16 @@ function RunTests(): void {
         Tests.push(ExecuteMultipleTest2);
         Tests.push(RetrieveEntityMetadata);
         Tests.push(EntityReferenceTest);
+
+        //All the synchronous tests
+        Tests.push(CreateAccountSync);
+        Tests.push(UpdateEntityTest1Sync);
+        Tests.push(RetrieveEntityTestSync);
+        Tests.push(AssociateTestSync);
+        Tests.push(RetrieveManyToManyTestSync);
+        Tests.push(DisassociateTestSync);
+        Tests.push(ExecuteTestSync);
+
 
         var CurrentFunctionIndex = 0;
         function TestComplete(results: TestResult) {
@@ -115,7 +126,7 @@ function MainTestFunction(): JQueryPromise<TestResult> {
     }).promise();
 }
 
-function CreateAccount(): JQueryPromise<TestResult> {
+function CreateAccountTest(): JQueryPromise<TestResult> {
     var Entity = new XrmTSToolkit.Soap.Entity("account");
     Entity.Attributes["creditonhold"] = new XrmTSToolkit.Soap.BooleanValue(true);
     Entity.Attributes["donotemail"] = true; //Test using just a boolean instead of just the 'BooleanValue'
@@ -140,6 +151,35 @@ function CreateAccount(): JQueryPromise<TestResult> {
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
             dfd.reject(new TestResult(false, "CreateAccount test failed: " + result.faultstring, result));
+        });
+    }).promise();
+}
+
+function CreateAccountSync(): JQueryPromise<TestResult> {
+    var Entity = new XrmTSToolkit.Soap.Entity("account");
+    Entity.Attributes["creditonhold"] = new XrmTSToolkit.Soap.BooleanValue(true);
+    Entity.Attributes["donotemail"] = true; //Test using just a boolean instead of just the 'BooleanValue'
+    Entity.Attributes["creditlimit"] = new XrmTSToolkit.Soap.MoneyValue(1000);
+    Entity.Attributes["lastusedincampaign"] = new XrmTSToolkit.Soap.DateValue(new Date());
+    Entity.Attributes["exchangerate"] = new XrmTSToolkit.Soap.DecimalValue(2000);
+    Entity.Attributes["address1_latitude"] = new XrmTSToolkit.Soap.FloatValue(90);
+    Entity.Attributes["numberofemployees"] = new XrmTSToolkit.Soap.IntegerValue(4000);
+    Entity.Attributes["ownerid"] = new XrmTSToolkit.Soap.EntityReference(Xrm.Page.context.getUserId(), "systemuser");
+    Entity.Attributes["description"] = new XrmTSToolkit.Soap.StringValue("This is a long string value");
+    Entity.Attributes["telephone1"] = "(999) 123-4567"; //Test using a string instead of just the 'StringValue'
+    Entity.Attributes["accountcategorycode"] = new XrmTSToolkit.Soap.OptionSetValue(1);
+    Entity.Attributes["name"] = new XrmTSToolkit.Soap.StringValue("Test Account");
+
+    return $.Deferred<TestResult>(function (dfd) {
+        var Promise = XrmTSToolkit.Soap.Create(Entity, true);
+        Promise.done(function (data: XrmTSToolkit.Soap.CreateSoapResponse, result, xhr) {
+            if (!data.CreateResult) { dfd.reject(new TestResult(false, "Create Sync test failed")); }
+            else {
+                dfd.resolve(new TestResult(true, "CreateAccount Sync test succeeded", data.CreateResult));
+            }
+        });
+        Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+            dfd.reject(new TestResult(false, "CreateAccount Sync test failed: " + result.faultstring, result));
         });
     }).promise();
 }
@@ -187,10 +227,90 @@ function UpdateEntityTest1(PriorTestResult: TestResult): JQueryPromise<TestResul
     }).promise();
 }
 
+function UpdateEntityTest1Sync(PriorTestResult: TestResult): JQueryPromise<TestResult> {
+    var Entity = new XrmTSToolkit.Soap.Entity("account", PriorTestResult.ResultValue);
+    Entity.Attributes["creditonhold"] = new XrmTSToolkit.Soap.BooleanValue(true);
+    Entity.Attributes["creditlimit"] = new XrmTSToolkit.Soap.MoneyValue(10000);
+    Entity.Attributes["lastusedincampaign"] = new XrmTSToolkit.Soap.DateValue(new Date());
+    Entity.Attributes["exchangerate"] = new XrmTSToolkit.Soap.DecimalValue(20000);
+    Entity.Attributes["address1_latitude"] = new XrmTSToolkit.Soap.FloatValue(-90);
+    Entity.Attributes["numberofemployees"] = new XrmTSToolkit.Soap.IntegerValue(40000);
+    Entity.Attributes["ownerid"] = new XrmTSToolkit.Soap.EntityReference(Xrm.Page.context.getUserId(), "systemuser");
+    Entity.Attributes["description"] = new XrmTSToolkit.Soap.StringValue("This is a long string value - updated");
+    Entity.Attributes["accountcategorycode"] = new XrmTSToolkit.Soap.OptionSetValue(2);
+    Entity.Attributes["name"] = new XrmTSToolkit.Soap.StringValue("Test Account - updated");
+
+    return $.Deferred<TestResult>(function (dfd) {
+        var Promise = XrmTSToolkit.Soap.Update(Entity, true);
+        Promise.done(function (data: XrmTSToolkit.Soap.UpdateSoapResponse, result, xhr) {
+            dfd.resolve(new TestResult(true, "Update1 Sync test succeeded", PriorTestResult.ResultValue));
+        });
+        Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+            dfd.reject(new TestResult(false, "Update1 Sync test failed: " + result.faultstring, result));
+        });
+    }).promise();
+}
+
 function RetrieveEntityTest(PriorTestResult: TestResult): JQueryPromise<TestResult> {
     var EntityId = PriorTestResult.ResultValue;
     return $.Deferred<TestResult>(function (dfd) {
         var Promise = XrmTSToolkit.Soap.Retrieve(EntityId, "account", new XrmTSToolkit.Soap.ColumnSet(true));
+        Promise.done(function (data: XrmTSToolkit.Soap.RetrieveSoapResponse, result, xhr) {
+            try {
+                var entity = data.RetrieveResult;
+                var stringValue = (<XrmTSToolkit.Soap.StringValue>entity.Attributes["name"]);
+                if (!stringValue) { throw { description: "The string value was not returned" }; }
+                var dateValue = (<XrmTSToolkit.Soap.DateValue>entity.Attributes["createdon"]);
+                if (!dateValue) { throw { description: "The date value was not returned" }; }
+                var booleanValue = (<XrmTSToolkit.Soap.BooleanValue>entity.Attributes["creditonhold"]);
+                if (!booleanValue) { throw { description: "The boolean value was not returned" }; }
+                var numberValue = (<XrmTSToolkit.Soap.IntegerValue>entity.Attributes["numberofemployees"]);
+                if (!numberValue) { throw { description: "The number value was not returned" }; }
+
+                var ownerId = (<XrmTSToolkit.Soap.EntityReference>entity.Attributes["ownerid"]).Id;
+                if (!ownerId) { throw { description: "The entity reference value was not returned" }; }
+                var ownerName = (<XrmTSToolkit.Soap.EntityReference>entity.Attributes["ownerid"]).Name;
+                var formattedValue = (<XrmTSToolkit.Soap.OptionSetValue>entity.Attributes["statuscode"]).FormattedValue;
+                if (!formattedValue) { throw { description: "The formatted value was not returned" }; }
+                if (!entity.LogicalName) { throw { description: "The 'LogicalName' is not populated" }; }
+                if (entity.Id == "00000000-0000-0000-0000-000000000000") { throw { description: "The 'Id' is not populated" }; }
+
+                //Now test the 'getAttribute' method of the entity
+                booleanValue = entity.getAttribute<XrmTSToolkit.Soap.BooleanValue>("creditonhold");
+                if (!booleanValue) { throw { description: "The getAttribute<boolean> failed" }; }
+                dateValue = entity.getAttribute<XrmTSToolkit.Soap.DateValue>("createdon");
+                if (!dateValue) { throw { description: "The getAttribute<Date> failed" }; }
+                stringValue = entity.getAttribute<XrmTSToolkit.Soap.StringValue>("name");
+                if (!stringValue) { throw { description: "The getAttribute<string> failed" }; }
+                numberValue = entity.getAttribute<XrmTSToolkit.Soap.IntegerValue>("numberofemployees");
+                if (!numberValue) { throw { description: "The getAttribute<numberValue> failed" }; }
+
+                //Test the raw value methods
+                var stringRaw = entity.getString("name");
+                if (!stringRaw || typeof (stringRaw) !== "string") { throw { description: "The getString method failed" }; }
+                var boolRaw = entity.getBool("creditonhold");
+                if (!boolRaw || typeof (boolRaw) !== "boolean") { throw { description: "The getBool method failed" }; }
+                var dateRaw = entity.getDate("createdon");
+                if (!dateRaw || !(dateRaw instanceof Date)) { throw { description: "The getDate method failed" }; }
+                var numberRaw = entity.getNumber("numberofemployees");
+                if (!numberRaw || typeof (numberRaw) !== "number") { throw { description: "The getNumber method failed" }; }
+
+                dfd.resolve(new TestResult(true, "Retrieve test succeeded", PriorTestResult.ResultValue));
+            }
+            catch (e) {
+                dfd.reject(new TestResult(false, "Retrieve test failed: " + e.description));
+            }
+        });
+        Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+            dfd.reject(new TestResult(false, "Retrieve test failed: " + result.faultstring, result));
+        });
+    }).promise();
+}
+
+function RetrieveEntityTestSync(PriorTestResult: TestResult): JQueryPromise<TestResult> {
+    var EntityId = PriorTestResult.ResultValue;
+    return $.Deferred<TestResult>(function (dfd) {
+        var Promise = XrmTSToolkit.Soap.Retrieve(EntityId, "account", new XrmTSToolkit.Soap.ColumnSet(true), true);
         Promise.done(function (data: XrmTSToolkit.Soap.RetrieveSoapResponse, result, xhr) {
             try {
                 var Entity = data.RetrieveResult;
@@ -203,14 +323,14 @@ function RetrieveEntityTest(PriorTestResult: TestResult): JQueryPromise<TestResu
                 if (!FormattedValue) { throw { description: "The formatted value was not returned" }; }
                 if (!Entity.LogicalName) { throw { description: "The 'LogicalName' is not populated" }; }
                 if (Entity.Id == "00000000-0000-0000-0000-000000000000") { throw { description: "The 'Id' is not populated" }; }
-                dfd.resolve(new TestResult(true, "Retrieve test succeeded", PriorTestResult.ResultValue));
+                dfd.resolve(new TestResult(true, "Retrieve Sync test succeeded", PriorTestResult.ResultValue));
             }
             catch (e) {
-                dfd.reject(new TestResult(false, "Retrieve test failed: " + e.description));
+                dfd.reject(new TestResult(false, "Retrieve Sync test failed: " + e.description));
             }
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
-            dfd.reject(new TestResult(false, "Retrieve test failed: " + result.faultstring, result));
+            dfd.reject(new TestResult(false, "Retrieve Sync test failed: " + result.faultstring, result));
         });
     }).promise();
 }
@@ -232,6 +352,25 @@ function AssociateTest(PriorTestResult: TestResult): JQueryPromise<TestResult> {
     }).promise();
 }
 
+function AssociateTestSync(PriorTestResult: TestResult): JQueryPromise<TestResult> {
+    var EntityId = PriorTestResult.ResultValue;
+    return $.Deferred<TestResult>(function (dfd) {
+        var Promise = XrmTSToolkit.Soap.Associate(
+            new XrmTSToolkit.Soap.EntityReference(EntityId, "account"),
+            new XrmTSToolkit.Soap.EntityReference(Xrm.Page.context.getUserId(), "systemuser"),
+            "new_account_systemuser",
+            false
+        );
+
+        Promise.done(function (data: XrmTSToolkit.Soap.SoapResponse, result, xhr) {
+            dfd.resolve(new TestResult(true, "Associate Sync test succeeded", PriorTestResult.ResultValue));
+        });
+        Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+            dfd.reject(new TestResult(false, "Associate Sync test failed: " + result.faultstring, result));
+        });
+    }).promise();
+}
+
 function RetrieveManyToManyTest(PriorTestResult: TestResult): JQueryPromise<TestResult> {
     return $.Deferred<TestResult>(function (dfd) {
         var Promise = XrmTSToolkit.Soap.RetrieveRelatedManyToMany("account", PriorTestResult.ResultValue, "systemuser", "new_account_systemuser", new XrmTSToolkit.Soap.ColumnSet(false));
@@ -242,6 +381,20 @@ function RetrieveManyToManyTest(PriorTestResult: TestResult): JQueryPromise<Test
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
             dfd.reject(new TestResult(false, "Retrieve ManyToManyTest test failed: " + result.faultstring, result));
+        });
+    }).promise();
+}
+
+function RetrieveManyToManyTestSync(PriorTestResult: TestResult): JQueryPromise<TestResult> {
+    return $.Deferred<TestResult>(function (dfd) {
+        var Promise = XrmTSToolkit.Soap.RetrieveRelatedManyToMany("account", PriorTestResult.ResultValue, "systemuser", "new_account_systemuser", new XrmTSToolkit.Soap.ColumnSet(false), [], true);
+        Promise.done(function (data: XrmTSToolkit.Soap.RetrieveMultipleSoapResponse, result, xhr) {
+            if (!data.RetrieveMultipleResult || !data.RetrieveMultipleResult.Entities) { dfd.reject(new TestResult(false, "No records were returned from the RetrieveManyToManyTest test.")); }
+            TestEntityValues(data.RetrieveMultipleResult.Entities);
+            dfd.resolve(new TestResult(true, "Retrieve ManyToManyTest Sync test succeeded", PriorTestResult.ResultValue));
+        });
+        Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+            dfd.reject(new TestResult(false, "Retrieve ManyToManyTest Sync test failed: " + result.faultstring, result));
         });
     }).promise();
 }
@@ -259,6 +412,25 @@ function DisassociateTest(PriorTestResult: TestResult): JQueryPromise<TestResult
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
             dfd.reject(new TestResult(false, "Disassociate test failed: " + result.faultstring, result));
+        });
+    }).promise();
+}
+
+function DisassociateTestSync(PriorTestResult: TestResult): JQueryPromise<TestResult> {
+    var EntityId = PriorTestResult.ResultValue;
+    return $.Deferred<TestResult>(function (dfd) {
+        var Promise = XrmTSToolkit.Soap.Disassociate(
+            new XrmTSToolkit.Soap.EntityReference(EntityId, "account"),
+            new XrmTSToolkit.Soap.EntityReference(Xrm.Page.context.getUserId(), "systemuser"),
+            "new_account_systemuser",
+            false
+        );
+
+        Promise.done(function (data: XrmTSToolkit.Soap.SoapResponse, result, xhr) {
+            dfd.resolve(new TestResult(true, "Disassociate Sync test succeeded", PriorTestResult.ResultValue));
+        });
+        Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+            dfd.reject(new TestResult(false, "Disassociate Sync test failed: " + result.faultstring, result));
         });
     }).promise();
 }
@@ -450,7 +622,7 @@ function TestEntityValues(Entities: Array<XrmTSToolkit.Soap.Entity>) {
 
 function ExecuteTest(PriorTestResult: TestResult): JQueryPromise<TestResult> {
     //Execute a 'WhoAmI' request
-    var ExecuteXML = "" +
+    var executeXml = "" +
         "<Execute xmlns=\"http://schemas.microsoft.com/xrm/2011/Contracts/Services\" xmlns:i=\"http://www.w3.org/2001/XMLSchema-instance\">" +
         "<request i:type=\"b:WhoAmIRequest\" xmlns:a = \"http://schemas.microsoft.com/xrm/2011/Contracts\" xmlns:b = \"http://schemas.microsoft.com/crm/2011/Contracts\">" +
         "<a:Parameters xmlns:c = \"http://schemas.datacontract.org/2004/07/System.Collections.Generic\" />" +
@@ -459,13 +631,39 @@ function ExecuteTest(PriorTestResult: TestResult): JQueryPromise<TestResult> {
         "</request>" +
         "</Execute>";
 
+    var executeRequest = new XrmTSToolkit.Soap.RawExecuteRequest(executeXml);
+
     return $.Deferred<TestResult>(function (dfd) {
-        var Promise = XrmTSToolkit.Soap.Execute(ExecuteXML);
+        var Promise = XrmTSToolkit.Soap.Execute(executeRequest);
         Promise.done(function (data: XrmTSToolkit.Soap.SoapResponse, result, xhr) {
             dfd.resolve(new TestResult(true, "Execute test succeeded", PriorTestResult.ResultValue));
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
             dfd.reject(new TestResult(false, "Execute test failed: " + result.faultstring, result));
+        });
+    }).promise();
+}
+
+function ExecuteTestSync(PriorTestResult: TestResult): JQueryPromise<TestResult> {
+    //Execute a 'WhoAmI' request
+    var executeXml = "" +
+        "<Execute xmlns=\"http://schemas.microsoft.com/xrm/2011/Contracts/Services\" xmlns:i=\"http://www.w3.org/2001/XMLSchema-instance\">" +
+        "<request i:type=\"b:WhoAmIRequest\" xmlns:a = \"http://schemas.microsoft.com/xrm/2011/Contracts\" xmlns:b = \"http://schemas.microsoft.com/crm/2011/Contracts\">" +
+        "<a:Parameters xmlns:c = \"http://schemas.datacontract.org/2004/07/System.Collections.Generic\" />" +
+        "<a:RequestId i:nil = \"true\" />" +
+        "<a:RequestName>WhoAmI</a:RequestName>" +
+        "</request>" +
+        "</Execute>";
+
+    var executeRequest = new XrmTSToolkit.Soap.RawExecuteRequest(executeXml);
+
+    return $.Deferred<TestResult>(function (dfd) {
+        var Promise = XrmTSToolkit.Soap.Execute(executeRequest, true);
+        Promise.done(function (data: XrmTSToolkit.Soap.SoapResponse, result, xhr) {
+            dfd.resolve(new TestResult(true, "Execute Sync test succeeded", PriorTestResult.ResultValue));
+        });
+        Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+            dfd.reject(new TestResult(false, "Execute Sync test failed: " + result.faultstring, result));
         });
     }).promise();
 }
@@ -593,6 +791,50 @@ function DeleteTest1(PriorTestResult: TestResult): JQueryPromise<TestResult> {
     }).promise();
 }
 
+module CustomActions {
+    export class CustomActionRequest extends XrmTSToolkit.Soap.CustomActionRequest {
+        constructor(account: XrmTSToolkit.Soap.EntityReference) {
+            super("new_CustomAction"); //This is the name of the custom action defined in CRM
+            this.Parameters["Target"] = account;
+        }
+
+        CreateResponse(responseXml: string): CustomActionResponse {
+            return new CustomActionResponse(responseXml);
+        }
+    }
+    export class CustomActionResponse extends XrmTSToolkit.Soap.ExecuteResponse {
+        constructor(responseXml: string) {
+            super(responseXml);
+            this.PropertyTypes["ReturnValueString"] = "s"; // s == string
+            this.PropertyTypes["ReturnValueBool"] = "b"; // b == bool
+            this.PropertyTypes["ReturnValueInt"] = "n"; // n == number
+            this.PropertyTypes["ReturnValueMoney"] = "n";
+        }
+        ReturnValueString: string;
+        ReturnValueBool: boolean;
+        ReturnValueInt: number;
+        ReturnValueMoney: number;
+    }
+}
+
+function CustomActionTest(PriorTestResult: TestResult): JQueryPromise<TestResult> {
+    return $.Deferred<TestResult>(function (dfd) {
+        var entityRef = new XrmTSToolkit.Soap.EntityReference(PriorTestResult.ResultValue, "account");
+        var customActionRequest = new CustomActions.CustomActionRequest(entityRef);
+        var Promise = XrmTSToolkit.Soap.Execute(customActionRequest);
+        Promise.done(function (data: CustomActions.CustomActionResponse, result, xhr) {
+            if (data.ReturnValueString != "StringValue" || data.ReturnValueBool != true || data.ReturnValueInt != 100 || data.ReturnValueMoney != 100)
+                dfd.reject("CustomAction test failed: one of the expected values was not correct");
+            else
+                dfd.resolve(new TestResult(true, "CustomAction test succeeded", PriorTestResult.ResultValue));
+        });
+        Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
+            dfd.reject(new TestResult(false, "CustomAction test failed: " + result.faultstring, result));
+        });
+    }).promise();
+}
+
+
 function WhoAmITest(PriorTestResult: TestResult): JQueryPromise<TestResult> {
     return $.Deferred<TestResult>(function (dfd) {
         var Promise = XrmTSToolkit.Soap.Execute(new XrmTSToolkit.Soap.WhoAmIRequest());
@@ -667,7 +909,7 @@ function FaultTest1(PriorTestResult: TestResult): JQueryPromise<TestResult> {
             dfd.resolve(new TestResult(false, "FaultTest test failed - did not throw an exception.", PriorTestResult.ResultValue));
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
-            dfd.reject(new TestResult(true, "FaultTest test succeeded: " + result.detail.OrganizationServiceFault.Message));
+            dfd.reject(new TestResult(true, "FaultTest test succeeded: " + result.errorMessage));
         });
     }).promise();
 }
@@ -684,7 +926,7 @@ function FaultTest2(PriorTestResult: TestResult): JQueryPromise<TestResult> {
             dfd.resolve(new TestResult(false, "FaultTest2 test failed - did not throw an exception.", PriorTestResult.ResultValue));
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
-            dfd.reject(new TestResult(true, "FaultTest2 test succeeded: " + result.detail.OrganizationServiceFault.Message));
+            dfd.reject(new TestResult(true, "FaultTest2 test succeeded: " + result.errorMessage));
         });
     }).promise();
 }
@@ -754,7 +996,7 @@ function DeleteTest2(PriorTestResult: TestResult): JQueryPromise<TestResult> {
 function ExecuteMultipleTest1(PriorTestResult: TestResult): JQueryPromise<TestResult> {
     //Create a new record first and then Update and Delete it in the execute multiple
     return $.Deferred<TestResult>(function (dfd) {
-        var CreatePromise = CreateAccount();
+        var CreatePromise = CreateAccountTest();
         CreatePromise.done(function (CreateTestResult: TestResult) {
             var EntityId = CreateTestResult.ResultValue;
             var EntityToUpdate = new XrmTSToolkit.Soap.Entity("account", EntityId);
@@ -775,7 +1017,7 @@ function ExecuteMultipleTest1(PriorTestResult: TestResult): JQueryPromise<TestRe
                 $.each(data.Responses, function (i, ResponseItem) {
                     if (ResponseItem.Fault) {
                         //There was an error with the specific request
-                        
+
                     }
                     else {
 
@@ -839,7 +1081,7 @@ function RetrieveEntityMetadata(PriorTestResult: TestResult): JQueryPromise<Test
             }
         });
         Promise.fail(function (result: XrmTSToolkit.Soap.FaultResponse) {
-            dfd.reject(new TestResult(false, "Retrieve Entity Metadata test succeeded failed: " + result.faultstring, result));
+            dfd.reject(new TestResult(false, "Retrieve Entity Metadata test failed: " + result.faultstring, result));
         });
     }).promise();
 }
@@ -859,7 +1101,7 @@ function EntityReferenceTest(PriorTestResult: TestResult): JQueryPromise<TestRes
         else if (entityRef.Name !== name)
             dfd.reject(new TestResult(false, "The Name's do not match."));
         else
-            dfd.resolve(new TestResult(true, "All the private fields match the public properties of the entity reference!"));
+            dfd.resolve(new TestResult(true, "EntityReferenceTest succeeded: All the private fields match the public properties of the entity reference!"));
     }).promise();
 }
 
