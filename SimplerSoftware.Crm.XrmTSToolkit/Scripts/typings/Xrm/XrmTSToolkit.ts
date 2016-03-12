@@ -653,90 +653,100 @@ module XrmTSToolkit {
                     currentPropertyType = SoapResponse.GetPropertyTypeFromParent(parentObject, xrmBaseObject.Name);
                 }
                 if (currentPropertyType) {
-                    if (currentPropertyType == "s") {
-                        currentObject = xrmBaseObject.Value;
-                    } else if (currentPropertyType == "b") {
-                        currentObject = xrmBaseObject.Value == "true" || xrmBaseObject.Value == "True" ? true : false;
-                    } else if (currentPropertyType == "n") {
-                        currentObject = parseFloat(xrmBaseObject.Value);
-                    } else if (currentPropertyType == "f") {
-                        currentObject = parseFloat(xrmBaseObject.Value);
-                    } else if (currentPropertyType == "i") {
-                        currentObject = parseInt(xrmBaseObject.Value);
-                    } else if (currentPropertyType == "d") {
-                        currentObject = new Date(xrmBaseObject.Value);
-                    } else if (currentPropertyType == "Array" || currentPropertyType.indexOf("[") == 0) {
-                        currentObject = new Array();
-                    }
-                    else if (currentPropertyType == "AccessRights") {
-                        currentObject = new Array<AccessRights>();
-                        var rights: Array<string> = xrmBaseObject.Value.split(" ");
-                        $.each(rights, function (i, Right) {
-                            (<Array<AccessRights>>currentObject).push(AccessRights[Right]);
-                        });
-                    }
-                    else if (currentPropertyType == "AliasedValue") {
-                        currentObject = new Soap.AliasedValue();
-                    }
-                    else if (currentPropertyType == "boolean") {
-                        currentObject = new Soap.BooleanValue(xrmBaseObject.Value == "true" || xrmBaseObject.Value == "True" ? true : false);
-                    }
-                    else if (currentPropertyType == "double") {
-                        currentObject = new Soap.DoubleValue(parseFloat(xrmBaseObject.Value));
-                    }
-                    else if (currentPropertyType == "decimal") {
-                        currentObject = new Soap.DecimalValue(parseFloat(xrmBaseObject.Value));
-                    }
-                    else if (currentPropertyType == "dateTime") {
-                        if (xrmBaseObject.Value) {
-                            xrmBaseObject.Value = xrmBaseObject.Value.replaceAll("T", " ").replaceAll("-", "/");
-                        }
-                        currentObject = new Soap.DateValue(new Date(xrmBaseObject.Value));
-                    }
-                    else if (currentPropertyType == "EntityReference") {
-                        currentObject = new Soap.EntityReference(
-                            SoapResponse.FindArrayElementByName((<Array<XRMObject>>xrmBaseObject.Value), "Name", "Id").Value,
-                            SoapResponse.FindArrayElementByName((<Array<XRMObject>>xrmBaseObject.Value), "Name", "LogicalName").Value,
-                            SoapResponse.FindArrayElementByName((<Array<XRMObject>>xrmBaseObject.Value), "Name", "Name").Value
-                        );
-                        xrmBaseObject.Value = null;  //Prevents the parsing of the child values
-                    }
-                    else if (currentPropertyType == "EntityReferenceCollection") {
-                        currentObject = new EntityReferenceCollection();
-                    }
-                    else if (currentPropertyType == "float") {
-                        currentObject = new Soap.FloatValue(parseFloat(xrmBaseObject.Value));
-                    }
-                    else if (currentPropertyType == "guid") {
-                        currentObject = new Soap.GuidValue(xrmBaseObject.Value);
-                    }
-                    else if (currentPropertyType == "int") {
-                        currentObject = new Soap.IntegerValue(parseInt(xrmBaseObject.Value));
-                    }
-                    else if (currentPropertyType == "Money") {
-                        currentObject = new Soap.MoneyValue(parseFloat((<XRMObject>xrmBaseObject.Value).Value));
-                        xrmBaseObject.Value = null;  //Prevents the parsing of the child values
-                    }
-                    else if (currentPropertyType == "OptionSetValue") {
-                        currentObject = new Soap.OptionSetValue(parseFloat((<XRMObject>xrmBaseObject.Value).Value));
-                        xrmBaseObject.Value = null;  //Prevents the parsing of the child values
-                    }
-                    else if (currentPropertyType == "OrganizationResponseCollection") {
-                        currentObject = new Array<ExecuteMultipleResponseItem>();
-                    }
-                    else if (currentPropertyType == "string") {
-                        currentObject = new Soap.StringValue(xrmBaseObject.Value);
-                    }
-                    else if (currentPropertyType == "ManagedProperty") {
-                        currentObject = new Soap.ManagedProperty(
-                            (<Array<XRMObject>>xrmBaseObject.Value)[0].Value == "true",
-                            (<Array<XRMObject>>xrmBaseObject.Value)[1].Value == "true",
-                            (<Array<XRMObject>>xrmBaseObject.Value)[2].Value == "true"
-                        );
-                        xrmBaseObject.Value = null;  //Prevents the parsing of the child values
-                    }
-                    else {
-                        currentObject = SoapResponse.CreateObject(currentPropertyType);
+                    switch (currentPropertyType) {
+                        case "s":
+                            currentObject = xrmBaseObject.Value;
+                            break;
+                        case "b":
+                            currentObject = xrmBaseObject.Value === "true" || xrmBaseObject.Value === "True";
+                            break;
+                        case "n":
+                        case "f":
+                            currentObject = parseFloat(xrmBaseObject.Value);
+                            break;
+                        case "i":
+                            currentObject = parseInt(xrmBaseObject.Value);
+                            break;
+                        case "d":
+                            currentObject = new Date(xrmBaseObject.Value);
+                            break;
+                        case "Array":
+                            currentObject = new Array();
+                            break;
+                        case "AccessRights":
+                            let values = new Array<AccessRights>();
+                            var rights: Array<string> = xrmBaseObject.Value.split(" ");
+                            $.each(rights, (i, right) => {
+                                values.push(AccessRights[right]);
+                            });
+                            currentObject = values;
+                            break;
+                        case "AliasedValue":
+                            currentObject = new Soap.AliasedValue();
+                            break;
+                        case "boolean":
+                            currentObject = new Soap.BooleanValue(xrmBaseObject.Value === "true" || xrmBaseObject.Value === "True");
+                            break;
+                        case "double":
+                            currentObject = new Soap.DoubleValue(parseFloat(xrmBaseObject.Value));
+                            break;
+                        case "decimal":
+                            currentObject = new Soap.DecimalValue(parseFloat(xrmBaseObject.Value));
+                            break;
+                        case "dateTime":
+                            if (xrmBaseObject.Value) {
+                                xrmBaseObject.Value = xrmBaseObject.Value.replaceAll("T", " ").replaceAll("-", "/");
+                            }
+                            currentObject = new Soap.DateValue(new Date(xrmBaseObject.Value));
+                            break;
+                        case "EntityReference":
+                            currentObject = new Soap.EntityReference(
+                                SoapResponse.FindArrayElementByName(xrmBaseObject.Value as Array<XRMObject>, "Name", "Id").Value,
+                                SoapResponse.FindArrayElementByName(xrmBaseObject.Value as Array<XRMObject>, "Name", "LogicalName").Value,
+                                SoapResponse.FindArrayElementByName(xrmBaseObject.Value as Array<XRMObject>, "Name", "Name").Value
+                            );
+                            xrmBaseObject.Value = null;  //Prevents the parsing of the child values
+                            break;
+                        case "EntityReferenceCollection":
+                            currentObject = new EntityReferenceCollection();
+                            break;
+                        case "float":
+                            currentObject = new Soap.FloatValue(parseFloat(xrmBaseObject.Value));
+                            break;
+                        case "guid":
+                            currentObject = new Soap.GuidValue(xrmBaseObject.Value);
+                            break;
+                        case "int":
+                            currentObject = new Soap.IntegerValue(parseInt(xrmBaseObject.Value));
+                            break;
+                        case "Money":
+                            currentObject = new Soap.MoneyValue(parseFloat((xrmBaseObject.Value as XRMObject).Value));
+                            xrmBaseObject.Value = null;  //Prevents the parsing of the child values
+                            break;
+                        case "OptionSetValue":
+                            currentObject = new Soap.OptionSetValue(parseFloat((xrmBaseObject.Value as XRMObject).Value));
+                            xrmBaseObject.Value = null;  //Prevents the parsing of the child values
+                            break;
+                        case "OrganizationResponseCollection":
+                            currentObject = new Array<ExecuteMultipleResponseItem>();
+                            break;
+                        case "string":
+                            currentObject = new Soap.StringValue(xrmBaseObject.Value);
+                            break;
+                        case "ManagedProperty":
+                            currentObject = new Soap.ManagedProperty(
+                                (xrmBaseObject.Value as Array<XRMObject>)[0].Value == "true",
+                                (xrmBaseObject.Value as Array<XRMObject>)[1].Value == "true",
+                                (xrmBaseObject.Value as Array<XRMObject>)[2].Value == "true"
+                            );
+                            xrmBaseObject.Value = null;  //Prevents the parsing of the child values
+                            break;
+                        default:
+                            if (currentPropertyType.indexOf("[") === 0) {
+                                currentObject = new Array();
+                            } else {
+                                currentObject = SoapResponse.CreateObject(currentPropertyType);
+                            }
                     }
                 }
                 else if (xrmBaseObject.IsKeyValuePair) {
